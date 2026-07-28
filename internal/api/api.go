@@ -85,6 +85,7 @@ func NewWithConfig(st *store.Store, cfg Config) *Server {
 	s.mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/v1/sources", s.handleSources)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /assets/site.js", s.handleSiteJS)
 	s.mux.HandleFunc("GET /support/aba-khqr.png", s.handleDonationQR)
 	s.mux.HandleFunc("GET /robots.txt", s.handleRobots)
 	s.mux.HandleFunc("GET /sitemap.xml", s.handleSitemap)
@@ -130,7 +131,7 @@ func setPublicHeaders(h http.Header) {
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
 	h.Set("Content-Security-Policy",
-		"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+		"default-src 'none'; connect-src 'self'; img-src 'self'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 }
 
 type cacheResponseWriter struct {
@@ -167,7 +168,8 @@ func cacheable(path string) bool {
 	case path == "/api/v1/status", path == "/healthz":
 		return false
 	case strings.HasPrefix(path, "/api/v1/"), path == "/",
-		path == "/support/aba-khqr.png", path == "/robots.txt", path == "/sitemap.xml":
+		path == "/assets/site.js", path == "/support/aba-khqr.png",
+		path == "/robots.txt", path == "/sitemap.xml":
 		return true
 	}
 	return false

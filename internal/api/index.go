@@ -12,6 +12,9 @@ const publicBaseURL = "https://khmerholiday.layhak.dev"
 //go:embed assets/aba-khqr.png
 var donationQR []byte
 
+//go:embed assets/site.js
+var siteJS []byte
+
 // handleIndex serves a self-contained API reference and landing page at the
 // root. It deliberately has no JavaScript or third-party resources.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +31,11 @@ func (s *Server) handleDonationQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Content-Disposition", `inline; filename="layhak-heng-aba-khqr.png"`)
 	http.ServeContent(w, r, "layhak-heng-aba-khqr.png", time.Time{}, bytes.NewReader(donationQR))
+}
+
+func (s *Server) handleSiteJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	_, _ = w.Write(siteJS)
 }
 
 func (s *Server) handleRobots(w http.ResponseWriter, _ *http.Request) {
@@ -105,11 +113,27 @@ h3{font-size:1rem;margin:0 0 .35rem}
 code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.875em}
 pre{background:var(--code);border:1px solid var(--bd);border-radius:8px;padding:.9rem 1rem;overflow-x:auto}
 code:not(pre code){background:var(--code);padding:.1em .35em;border-radius:3px}
+button{font:inherit}
 table{border-collapse:collapse;width:100%;font-size:.9rem}
 th,td{text-align:left;padding:.5rem .65rem;border-bottom:1px solid var(--bd);vertical-align:top}
 th{color:var(--mut);font-weight:650}
 .tag{display:inline-block;font-size:.72rem;padding:.1em .5em;border-radius:99px;border:1px solid var(--bd);color:var(--mut)}
 .scroll{overflow-x:auto}
+.examples{display:grid;gap:1rem;min-width:0}
+.example{min-width:0;background:var(--surface);border:1px solid var(--bd);border-radius:12px;padding:1rem;box-shadow:var(--shadow)}
+.example-head,.code-head{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.example-head p{margin:.15rem 0;color:var(--mut);font-size:.9rem}
+.code-head{margin-top:.85rem;color:var(--mut);font-size:.78rem;font-weight:650;text-transform:uppercase;letter-spacing:.04em}
+.example pre{width:100%;max-width:100%;margin:.35rem 0 0;max-height:28rem}
+.copy{flex:0 0 auto;border:1px solid var(--bd);border-radius:7px;padding:.35rem .65rem;color:var(--fg);background:var(--code);cursor:pointer;font-size:.82rem;font-weight:650}
+.copy:hover{border-color:var(--acc);color:var(--acc)}
+.copy:focus-visible{outline:3px solid color-mix(in srgb,var(--acc) 40%,transparent);outline-offset:2px}
+.copy:disabled{cursor:not-allowed;opacity:.55}
+.live-response{margin-top:.9rem;border-top:1px solid var(--bd);padding-top:.75rem}
+.live-response summary{cursor:pointer;color:var(--acc);font-weight:650}
+.live-response[open] summary{margin-bottom:.65rem}
+.response-status{min-height:1.3em;margin:.45rem 0 0;color:var(--mut);font-size:.82rem}
+.response-status.error{color:#b42318}
 .donate{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,390px);gap:2rem;align-items:center;margin-top:3rem;padding:clamp(1.2rem,4vw,2.2rem);background:var(--donate);border:1px solid #bae6fd;border-radius:18px}
 @media(prefers-color-scheme:dark){.donate{border-color:#164e63}}
 .donate h2{margin:0 0 .7rem;border:0;padding:0;font-size:1.55rem}
@@ -117,7 +141,7 @@ th{color:var(--mut);font-weight:650}
 .qr{display:block;width:100%;height:auto;border-radius:12px;border:1px solid var(--bd);background:#fff}
 .verify{font-size:.88rem;color:var(--mut)}
 footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid var(--bd)}
-@media(max-width:720px){header{padding-top:2.6rem}.facts{grid-template-columns:1fr;margin-top:-2rem}.donate{grid-template-columns:1fr}.donate picture{max-width:420px;margin:0 auto}table{min-width:34rem}}
+@media(max-width:720px){header{padding-top:2.6rem}.facts{grid-template-columns:1fr;margin-top:-2rem}.example-head{align-items:flex-start}.donate{grid-template-columns:1fr}.donate picture{max-width:420px;margin:0 auto}table{min-width:34rem}}
 </style>
 </head>
 <body>
@@ -180,11 +204,78 @@ footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid va
 
 <section id="examples">
 <h2>Examples</h2>
-<pre>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2026'
-curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2026&amp;month=4'
-curl 'https://khmerholiday.layhak.dev/api/v1/holidays/2026-04-14'
-curl 'https://khmerholiday.layhak.dev/api/v1/holidays?key=pchum_ben'
-curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2027&amp;official=true'</pre>
+<p class="sub">Each example is separate. Copy its request, then open the live response to run it against the current dataset.</p>
+<div class="examples">
+  <article class="example" data-endpoint="/api/v1/holidays?year=2026">
+    <div class="example-head">
+      <div><h3>Holidays by year</h3><p>Return every stored Cambodian holiday for 2026.</p></div>
+      <button class="copy" type="button" data-copy-target="request-year">Copy request</button>
+    </div>
+    <pre id="request-year"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2026'</code></pre>
+    <details class="live-response" open>
+      <summary>Live response</summary>
+      <div class="code-head"><span>JSON response</span><button class="copy response-copy" type="button" data-copy-target="response-year" disabled>Copy response</button></div>
+      <pre id="response-year"><code>Loading current response…</code></pre>
+      <p class="response-status" role="status" aria-live="polite"></p>
+    </details>
+  </article>
+
+  <article class="example" data-endpoint="/api/v1/holidays?year=2026&amp;month=4">
+    <div class="example-head">
+      <div><h3>Holidays by year and month</h3><p>Combine filters to return April 2026 holidays.</p></div>
+      <button class="copy" type="button" data-copy-target="request-month">Copy request</button>
+    </div>
+    <pre id="request-month"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2026&amp;month=4'</code></pre>
+    <details class="live-response">
+      <summary>Live response</summary>
+      <div class="code-head"><span>JSON response</span><button class="copy response-copy" type="button" data-copy-target="response-month" disabled>Copy response</button></div>
+      <pre id="response-month"><code>Open this section to load the current response.</code></pre>
+      <p class="response-status" role="status" aria-live="polite"></p>
+    </details>
+  </article>
+
+  <article class="example" data-endpoint="/api/v1/holidays/2026-04-14">
+    <div class="example-head">
+      <div><h3>Check one date</h3><p>Find out whether 14 April 2026 is a public holiday.</p></div>
+      <button class="copy" type="button" data-copy-target="request-date">Copy request</button>
+    </div>
+    <pre id="request-date"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays/2026-04-14'</code></pre>
+    <details class="live-response">
+      <summary>Live response</summary>
+      <div class="code-head"><span>JSON response</span><button class="copy response-copy" type="button" data-copy-target="response-date" disabled>Copy response</button></div>
+      <pre id="response-date"><code>Open this section to load the current response.</code></pre>
+      <p class="response-status" role="status" aria-live="polite"></p>
+    </details>
+  </article>
+
+  <article class="example" data-endpoint="/api/v1/holidays?key=pchum_ben">
+    <div class="example-head">
+      <div><h3>Find a holiday series</h3><p>Return every stored Pchum Ben date.</p></div>
+      <button class="copy" type="button" data-copy-target="request-key">Copy request</button>
+    </div>
+    <pre id="request-key"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?key=pchum_ben'</code></pre>
+    <details class="live-response">
+      <summary>Live response</summary>
+      <div class="code-head"><span>JSON response</span><button class="copy response-copy" type="button" data-copy-target="response-key" disabled>Copy response</button></div>
+      <pre id="response-key"><code>Open this section to load the current response.</code></pre>
+      <p class="response-status" role="status" aria-live="polite"></p>
+    </details>
+  </article>
+
+  <article class="example" data-endpoint="/api/v1/holidays?year=2027&amp;official=true">
+    <div class="example-head">
+      <div><h3>Official dates only</h3><p>Exclude every date not yet verified against the governing document.</p></div>
+      <button class="copy" type="button" data-copy-target="request-official">Copy request</button>
+    </div>
+    <pre id="request-official"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2027&amp;official=true'</code></pre>
+    <details class="live-response">
+      <summary>Live response</summary>
+      <div class="code-head"><span>JSON response</span><button class="copy response-copy" type="button" data-copy-target="response-official" disabled>Copy response</button></div>
+      <pre id="response-official"><code>Open this section to load the current response.</code></pre>
+      <p class="response-status" role="status" aria-live="polite"></p>
+    </details>
+  </article>
+</div>
 </section>
 
 <section id="confidence">
@@ -218,5 +309,6 @@ curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2027&amp;official=tru
 <footer>
   Cambodia public holiday data for developers and the Cambodian community. Built and maintained by Layhak Heng.
 </footer>
+<script src="/assets/site.js" defer></script>
 </body>
 </html>`

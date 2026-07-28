@@ -77,6 +77,7 @@ func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
 		`rel="canonical" href="https://khmerholiday.layhak.dev/"`,
 		`id="support"`,
 		`src="/support/aba-khqr.png"`,
+		`src="/assets/site.js"`,
 		`confirm that the recipient`,
 		`lang="km"`,
 	} {
@@ -87,10 +88,34 @@ func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
 	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "img-src 'self'") {
 		t.Errorf("Content-Security-Policy = %q, want self-hosted images allowed", got)
 	}
+	for _, directive := range []string{"connect-src 'self'", "script-src 'self'"} {
+		if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, directive) {
+			t.Errorf("Content-Security-Policy = %q, want %s", got, directive)
+		}
+	}
+	if got := strings.Count(rec.Body.String(), `class="example"`); got != 5 {
+		t.Errorf("example card count = %d, want 5", got)
+	}
+	if got := strings.Count(rec.Body.String(), `data-copy-target=`); got != 10 {
+		t.Errorf("copy button count = %d, want 10", got)
+	}
 }
 
 func TestDonationImageAndSearchFiles(t *testing.T) {
 	s, _ := testServer(t)
+
+	script := perform(s, "/assets/site.js")
+	if script.Code != http.StatusOK {
+		t.Fatalf("script status = %d, want 200", script.Code)
+	}
+	if got := script.Header().Get("Content-Type"); got != "application/javascript; charset=utf-8" {
+		t.Errorf("script Content-Type = %q", got)
+	}
+	for _, want := range []string{"navigator.clipboard", "fetch(example.dataset.endpoint,"} {
+		if !strings.Contains(script.Body.String(), want) {
+			t.Errorf("site script missing %q", want)
+		}
+	}
 
 	image := perform(s, "/support/aba-khqr.png")
 	if image.Code != http.StatusOK {
