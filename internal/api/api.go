@@ -85,6 +85,9 @@ func NewWithConfig(st *store.Store, cfg Config) *Server {
 	s.mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/v1/sources", s.handleSources)
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /support/aba-khqr.png", s.handleDonationQR)
+	s.mux.HandleFunc("GET /robots.txt", s.handleRobots)
+	s.mux.HandleFunc("GET /sitemap.xml", s.handleSitemap)
 	s.mux.HandleFunc("GET /", s.handleIndex)
 
 	return s
@@ -103,6 +106,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" {
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	}
 
 	// Only successful reference responses are cacheable. In particular, a CDN
@@ -124,7 +130,7 @@ func setPublicHeaders(h http.Header) {
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
 	h.Set("Content-Security-Policy",
-		"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+		"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 }
 
 type cacheResponseWriter struct {
@@ -160,7 +166,8 @@ func cacheable(path string) bool {
 	switch {
 	case path == "/api/v1/status", path == "/healthz":
 		return false
-	case strings.HasPrefix(path, "/api/v1/"), path == "/":
+	case strings.HasPrefix(path, "/api/v1/"), path == "/",
+		path == "/support/aba-khqr.png", path == "/robots.txt", path == "/sitemap.xml":
 		return true
 	}
 	return false

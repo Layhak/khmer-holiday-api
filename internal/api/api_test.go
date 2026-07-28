@@ -65,6 +65,64 @@ func TestSuccessfulResponsesAreCachedAndHardened(t *testing.T) {
 	}
 }
 
+func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
+	s, _ := testServer(t)
+	rec := perform(s, "/")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	for _, want := range []string{
+		"<title>Cambodia Public Holidays",
+		`rel="canonical" href="https://khmerholiday.layhak.dev/"`,
+		`id="support"`,
+		`src="/support/aba-khqr.png"`,
+		`confirm that the recipient`,
+		`lang="km"`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("homepage missing %q", want)
+		}
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "img-src 'self'") {
+		t.Errorf("Content-Security-Policy = %q, want self-hosted images allowed", got)
+	}
+}
+
+func TestDonationImageAndSearchFiles(t *testing.T) {
+	s, _ := testServer(t)
+
+	image := perform(s, "/support/aba-khqr.png")
+	if image.Code != http.StatusOK {
+		t.Fatalf("image status = %d, want 200", image.Code)
+	}
+	if got := image.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("image Content-Type = %q, want image/png", got)
+	}
+	if body := image.Body.Bytes(); len(body) < 8 || string(body[:8]) != "\x89PNG\r\n\x1a\n" {
+		t.Fatal("donation image is not a valid PNG")
+	}
+
+	robots := perform(s, "/robots.txt")
+	if robots.Code != http.StatusOK || !strings.Contains(robots.Body.String(), "Sitemap: "+publicBaseURL+"/sitemap.xml") {
+		t.Fatalf("unexpected robots.txt: status=%d body=%q", robots.Code, robots.Body.String())
+	}
+
+	sitemap := perform(s, "/sitemap.xml")
+	if sitemap.Code != http.StatusOK || !strings.Contains(sitemap.Body.String(), "<loc>"+publicBaseURL+"/</loc>") {
+		t.Fatalf("unexpected sitemap.xml: status=%d body=%q", sitemap.Code, sitemap.Body.String())
+	}
+}
+
+func TestAPIRoutesAreExcludedFromSearchIndex(t *testing.T) {
+	s, _ := testServer(t)
+	rec := perform(s, "/api/v1/holidays?year=2027")
+
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex, nofollow" {
+		t.Errorf("X-Robots-Tag = %q, want noindex, nofollow", got)
+	}
+}
+
 func TestInvalidFiltersAreRejectedAndNeverCached(t *testing.T) {
 	s, _ := testServer(t)
 	for _, target := range []string{
