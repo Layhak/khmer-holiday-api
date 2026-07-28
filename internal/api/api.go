@@ -87,6 +87,9 @@ func NewWithConfig(st *store.Store, cfg Config) *Server {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /assets/site.js", s.handleSiteJS)
 	s.mux.HandleFunc("GET /assets/social-preview.png", s.handleSocialPreview)
+	s.mux.HandleFunc("GET /assets/favicon.png", s.handleFaviconPNG)
+	s.mux.HandleFunc("GET /favicon.ico", s.handleFaviconICO)
+	s.mux.HandleFunc("GET /apple-touch-icon.png", s.handleAppleTouchIcon)
 	s.mux.HandleFunc("GET /support/aba-khqr.png", s.handleDonationQR)
 	s.mux.HandleFunc("GET /robots.txt", s.handleRobots)
 	s.mux.HandleFunc("GET /sitemap.xml", s.handleSitemap)
@@ -170,7 +173,8 @@ func cacheable(path string) bool {
 		return false
 	case strings.HasPrefix(path, "/api/v1/"), path == "/",
 		path == "/assets/site.js", path == "/assets/social-preview.png",
-		path == "/support/aba-khqr.png",
+		path == "/assets/favicon.png", path == "/favicon.ico",
+		path == "/apple-touch-icon.png", path == "/support/aba-khqr.png",
 		path == "/robots.txt", path == "/sitemap.xml":
 		return true
 	}

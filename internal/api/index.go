@@ -15,6 +15,15 @@ var donationQR []byte
 //go:embed assets/social-preview.png
 var socialPreview []byte
 
+//go:embed assets/favicon.ico
+var faviconICO []byte
+
+//go:embed assets/favicon.png
+var faviconPNG []byte
+
+//go:embed assets/apple-touch-icon.png
+var appleTouchIcon []byte
+
 //go:embed assets/site.js
 var siteJS []byte
 
@@ -40,6 +49,21 @@ func (s *Server) handleSocialPreview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Content-Disposition", `inline; filename="cambodia-holiday-api.png"`)
 	http.ServeContent(w, r, "cambodia-holiday-api.png", time.Time{}, bytes.NewReader(socialPreview))
+}
+
+func (s *Server) handleFaviconICO(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/x-icon")
+	http.ServeContent(w, r, "favicon.ico", time.Time{}, bytes.NewReader(faviconICO))
+}
+
+func (s *Server) handleFaviconPNG(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	http.ServeContent(w, r, "favicon.png", time.Time{}, bytes.NewReader(faviconPNG))
+}
+
+func (s *Server) handleAppleTouchIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	http.ServeContent(w, r, "apple-touch-icon.png", time.Time{}, bytes.NewReader(appleTouchIcon))
 }
 
 func (s *Server) handleSiteJS(w http.ResponseWriter, _ *http.Request) {
@@ -85,6 +109,9 @@ const indexHTML = `<!doctype html>
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta name="theme-color" content="#075985">
 <link rel="canonical" href="https://khmerholiday.layhak.dev/">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" type="image/png" href="/assets/favicon.png" sizes="512x512">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Khmer Holiday API">
 <meta property="og:title" content="Cambodia Public Holidays &amp; Free Khmer Holiday API">

@@ -79,6 +79,8 @@ func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
 		`rel="canonical" href="https://khmerholiday.layhak.dev/"`,
 		`property="og:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png"`,
 		`name="twitter:card" content="summary_large_image"`,
+		`rel="icon" href="/favicon.ico"`,
+		`rel="apple-touch-icon" href="/apple-touch-icon.png"`,
 		`id="support"`,
 		`src="/support/aba-khqr.png"`,
 		`src="/assets/site.js"`,
@@ -151,6 +153,26 @@ func TestDonationImageAndSearchFiles(t *testing.T) {
 	if config.Width != 1200 || config.Height != 630 {
 		t.Fatalf("social preview dimensions = %dx%d, want 1200x630",
 			config.Width, config.Height)
+	}
+
+	favicon := perform(s, "/favicon.ico")
+	if favicon.Code != http.StatusOK || favicon.Header().Get("Content-Type") != "image/x-icon" {
+		t.Fatalf("favicon response: status=%d type=%q",
+			favicon.Code, favicon.Header().Get("Content-Type"))
+	}
+	if body := favicon.Body.Bytes(); len(body) < 4 ||
+		!bytes.Equal(body[:4], []byte{0x00, 0x00, 0x01, 0x00}) {
+		t.Fatal("favicon is not a valid ICO file")
+	}
+
+	appleIcon := perform(s, "/apple-touch-icon.png")
+	appleConfig, err := png.DecodeConfig(bytes.NewReader(appleIcon.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode Apple touch icon: %v", err)
+	}
+	if appleConfig.Width != 180 || appleConfig.Height != 180 {
+		t.Fatalf("Apple touch icon dimensions = %dx%d, want 180x180",
+			appleConfig.Width, appleConfig.Height)
 	}
 
 	robots := perform(s, "/robots.txt")
