@@ -138,7 +138,8 @@ equality match) with `ordinal`/`of_days` giving the position — "day 2 of 3".
 ### CORS, caching and rate limits
 
 - **CORS** is open (`Access-Control-Allow-Origin: *`) — call it directly from a
-  browser, no proxy needed.
+  browser, no proxy needed. `Retry-After`, `X-RateLimit-Limit`, and `X-Cache`
+  are exposed to browser JavaScript.
 - **Caching**: holiday responses send `Cache-Control: public, max-age=3600`.
   When `KHAPI_REDIS_URL` is set, successful JSON responses are also cached in
   Redis for five minutes and report `X-Cache: MISS` or `HIT`. Redis errors fail
@@ -146,7 +147,10 @@ equality match) with `ordinal`/`of_days` giving the position — "day 2 of 3".
   undocumented or duplicated query parameters, `/api/v1/status`, and
   `/healthz` are never stored in Redis.
 - **Rate limit**: 60 requests/minute per IP by default, burst 20. Exceeding it
-  returns **429** with a `Retry-After` header. `/healthz` is never limited.
+  returns **429** with a five-second `Retry-After`. Requests made during that
+  cooldown double the same IP's delay up to 15 minutes, so sustained spam keeps
+  extending its own block. Ten quiet minutes reset the penalty. `/healthz` is
+  never limited.
 
 Please cache responses on your side — the data changes a few times a *year*.
 
@@ -154,6 +158,8 @@ Please cache responses on your side — the data changes a few times a *year*.
 |---|---|---|
 | `KHAPI_RATE_LIMIT` | `60` | Requests/minute per IP. `0` disables. |
 | `KHAPI_RATE_BURST` | `20` | Largest momentary burst. |
+| `KHAPI_RATE_PENALTY_SECONDS` | `5` | Initial cooldown after exhausting the per-IP bucket. |
+| `KHAPI_RATE_PENALTY_MAX_SECONDS` | `900` | Maximum cooldown for an IP that ignores `Retry-After`. |
 | `KHAPI_CACHE_SECONDS` | `3600` | `Cache-Control` max-age. |
 | `KHAPI_REDIS_URL` | empty | Optional `redis://` or `rediss://` connection URL. |
 | `KHAPI_REDIS_CACHE_SECONDS` | `300` | Server-side Redis response TTL; `0` disables. |

@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,7 +39,9 @@ func TestRateLimiterIsolatesClients(t *testing.T) {
 }
 
 func TestRateLimiterRefills(t *testing.T) {
-	rl := NewRateLimiter(6000, 1) // 100/sec: one token back every 10ms
+	now := time.Date(2026, time.July, 28, 0, 0, 0, 0, time.UTC)
+	rl := NewRateLimiterWithPenalty(6000, 1, time.Millisecond, time.Second)
+	rl.now = func() time.Time { return now }
 
 	if ok, _ := rl.Allow("ip"); !ok {
 		t.Fatal("first request blocked")
@@ -47,10 +50,73 @@ func TestRateLimiterRefills(t *testing.T) {
 		t.Fatal("second immediate request should be blocked")
 	}
 
-	time.Sleep(30 * time.Millisecond)
+	now = now.Add(30 * time.Millisecond)
 
 	if ok, _ := rl.Allow("ip"); !ok {
 		t.Error("bucket did not refill after waiting")
+	}
+}
+
+func TestRateLimiterEscalatesCooldownForSameIP(t *testing.T) {
+	now := time.Date(2026, time.July, 28, 0, 0, 0, 0, time.UTC)
+	rl := NewRateLimiterWithPenalty(60, 1, 5*time.Second, 20*time.Second)
+	rl.now = func() time.Time { return now }
+
+	if ok, _ := rl.Allow("spammer"); !ok {
+		t.Fatal("first request blocked")
+	}
+
+	for request, want := range []time.Duration{
+		5 * time.Second,
+		10 * time.Second,
+		20 * time.Second,
+		20 * time.Second,
+	} {
+		ok, wait := rl.Allow("spammer")
+		if ok {
+			t.Fatalf("spam request %d was allowed", request+1)
+		}
+		if wait != want {
+			t.Fatalf("spam request %d wait = %s, want %s", request+1, wait, want)
+		}
+	}
+
+	if ok, _ := rl.Allow("different-ip"); !ok {
+		t.Fatal("one IP's cooldown affected a different IP")
+	}
+}
+
+func TestRateLimiterResetsPenaltyAfterQuietPeriod(t *testing.T) {
+	now := time.Date(2026, time.July, 28, 0, 0, 0, 0, time.UTC)
+	rl := NewRateLimiterWithPenalty(60, 1, 5*time.Second, time.Minute)
+	rl.now = func() time.Time { return now }
+
+	rl.Allow("ip")
+	rl.Allow("ip") // five-second penalty
+	rl.Allow("ip") // escalates to ten seconds
+
+	now = now.Add(ratePenaltyResetAfter + time.Second)
+	if ok, _ := rl.Allow("ip"); !ok {
+		t.Fatal("request remained blocked after the quiet reset period")
+	}
+	if ok, wait := rl.Allow("ip"); ok || wait != 5*time.Second {
+		t.Fatalf("penalty after quiet reset: allowed=%v wait=%s, want false and 5s", ok, wait)
+	}
+}
+
+func TestQuietResetDoesNotShortenLongerActiveBlock(t *testing.T) {
+	now := time.Date(2026, time.July, 28, 0, 0, 0, 0, time.UTC)
+	rl := NewRateLimiterWithPenalty(60, 1, 5*time.Second, 15*time.Minute)
+	rl.now = func() time.Time { return now }
+
+	rl.Allow("spammer")
+	for range 9 {
+		rl.Allow("spammer")
+	}
+
+	now = now.Add(ratePenaltyResetAfter + time.Second)
+	if ok, wait := rl.Allow("spammer"); ok || wait != 15*time.Minute {
+		t.Fatalf("active maximum block was shortened: allowed=%v wait=%s", ok, wait)
 	}
 }
 
@@ -96,8 +162,36 @@ func TestMiddlewareReturns429WithRetryAfter(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("429 response is missing Retry-After")
 	}
+	if rec.Header().Get("Retry-After") != "5" {
+		t.Errorf("Retry-After = %q, want 5", rec.Header().Get("Retry-After"))
+	}
+	if got := rec.Body.String(); !strings.Contains(got, "repeated requests extend the cooldown") {
+		t.Errorf("429 response does not explain escalating cooldown: %q", got)
+	}
 	if rec.Header().Get("X-RateLimit-Limit") != "60" {
 		t.Errorf("X-RateLimit-Limit = %q, want 60", rec.Header().Get("X-RateLimit-Limit"))
+	}
+
+	rec = req()
+	if rec.Code != http.StatusTooManyRequests ||
+		rec.Header().Get("Retry-After") != "10" {
+		t.Fatalf("repeated spam response: status=%d Retry-After=%q, want 429 and 10",
+			rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+func TestRatePenaltyConfigValidation(t *testing.T) {
+	cfg := DefaultConfig()
+
+	cfg.RatePenaltyBase = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("zero base penalty was accepted")
+	}
+
+	cfg = DefaultConfig()
+	cfg.RatePenaltyMax = cfg.RatePenaltyBase - time.Second
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("maximum penalty below base penalty was accepted")
 	}
 }
 

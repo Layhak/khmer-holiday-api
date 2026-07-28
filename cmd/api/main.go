@@ -26,6 +26,10 @@ func main() {
 			"requests per minute per IP (0 disables rate limiting)")
 		burst = flag.Int("burst", envInt("KHAPI_RATE_BURST", 20),
 			"largest momentary burst per IP")
+		ratePenalty = flag.Int("rate-penalty", envInt("KHAPI_RATE_PENALTY_SECONDS", 5),
+			"initial per-IP cooldown in seconds after exceeding the rate limit")
+		ratePenaltyMax = flag.Int("rate-penalty-max", envInt("KHAPI_RATE_PENALTY_MAX_SECONDS", 900),
+			"maximum escalating per-IP cooldown in seconds")
 		cacheAge = flag.Int("cache", envInt("KHAPI_CACHE_SECONDS", 3600),
 			"Cache-Control max-age in seconds for holiday responses")
 		redisURL = flag.String("redis", envOr("KHAPI_REDIS_URL", ""),
@@ -40,6 +44,8 @@ func main() {
 	cfg := api.Config{
 		RatePerMinute:     *rate,
 		RateBurst:         *burst,
+		RatePenaltyBase:   time.Duration(*ratePenalty) * time.Second,
+		RatePenaltyMax:    time.Duration(*ratePenaltyMax) * time.Second,
 		TrustProxyHeaders: *trustProxy,
 		CacheMaxAge:       time.Duration(*cacheAge) * time.Second,
 		ResponseCacheTTL:  time.Duration(*redisCacheAge) * time.Second,
@@ -88,8 +94,9 @@ func run(addr, dbPath, redisURL string, cfg api.Config) error {
 	}
 
 	if cfg.RatePerMinute > 0 {
-		log.Printf("rate limit: %d req/min per IP (burst %d, trust-proxy=%v)",
-			cfg.RatePerMinute, cfg.RateBurst, cfg.TrustProxyHeaders)
+		log.Printf("rate limit: %d req/min per IP (burst %d, spam cooldown %s-%s, trust-proxy=%v)",
+			cfg.RatePerMinute, cfg.RateBurst, cfg.RatePenaltyBase,
+			cfg.RatePenaltyMax, cfg.TrustProxyHeaders)
 	} else {
 		log.Print("rate limit: disabled")
 	}

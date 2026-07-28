@@ -24,6 +24,11 @@ type Config struct {
 	// RateBurst is the largest momentary burst a client may make.
 	RateBurst int
 
+	// RatePenaltyBase is the first cooldown after a client exhausts its bucket.
+	// Requests made during a cooldown double it up to RatePenaltyMax.
+	RatePenaltyBase time.Duration
+	RatePenaltyMax  time.Duration
+
 	// TrustProxyHeaders makes the limiter read CF-Connecting-IP /
 	// X-Forwarded-For. Enable ONLY behind a proxy or CDN: these headers are
 	// client-supplied and trivially spoofed when the service is exposed
@@ -48,6 +53,14 @@ func (c Config) Validate() error {
 	if c.RatePerMinute > 0 && (c.RateBurst <= 0 || c.RateBurst > 1_000_000) {
 		return fmt.Errorf("rate burst must be between 1 and 1000000 when rate limiting is enabled")
 	}
+	if c.RatePerMinute > 0 &&
+		(c.RatePenaltyBase < time.Second || c.RatePenaltyBase > time.Hour) {
+		return fmt.Errorf("rate penalty must be between 1 second and 1 hour")
+	}
+	if c.RatePerMinute > 0 &&
+		(c.RatePenaltyMax < c.RatePenaltyBase || c.RatePenaltyMax > 24*time.Hour) {
+		return fmt.Errorf("maximum rate penalty must be at least the base penalty and no more than 24 hours")
+	}
 	if c.CacheMaxAge < 0 || c.CacheMaxAge > 365*24*time.Hour {
 		return fmt.Errorf("cache max-age must be between 0 and 365 days")
 	}
@@ -62,6 +75,8 @@ func DefaultConfig() Config {
 	return Config{
 		RatePerMinute:    60,
 		RateBurst:        20,
+		RatePenaltyBase:  defaultRatePenaltyBase,
+		RatePenaltyMax:   defaultRatePenaltyMax,
 		CacheMaxAge:      time.Hour,
 		ResponseCacheTTL: 5 * time.Minute,
 	}
@@ -88,10 +103,15 @@ func NewWithConfig(st *store.Store, cfg Config) *Server {
 // response cache.
 func NewWithConfigAndCache(st *store.Store, cfg Config, responseCache ResponseCache) *Server {
 	s := &Server{
-		st:            st,
-		mux:           http.NewServeMux(),
-		cfg:           cfg,
-		limiter:       NewRateLimiter(cfg.RatePerMinute, cfg.RateBurst),
+		st:  st,
+		mux: http.NewServeMux(),
+		cfg: cfg,
+		limiter: NewRateLimiterWithPenalty(
+			cfg.RatePerMinute,
+			cfg.RateBurst,
+			cfg.RatePenaltyBase,
+			cfg.RatePenaltyMax,
+		),
 		responseCache: responseCache,
 	}
 
@@ -150,6 +170,7 @@ func setPublicHeaders(h http.Header) {
 	h.Set("Access-Control-Allow-Origin", "*")
 	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 	h.Set("Access-Control-Max-Age", "86400")
+	h.Set("Access-Control-Expose-Headers", "Retry-After, X-Cache, X-RateLimit-Limit")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "no-referrer")
