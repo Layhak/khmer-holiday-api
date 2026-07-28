@@ -12,6 +12,9 @@ const publicBaseURL = "https://khmerholiday.layhak.dev"
 //go:embed assets/aba-khqr.png
 var donationQR []byte
 
+//go:embed assets/social-preview.png
+var socialPreview []byte
+
 //go:embed assets/site.js
 var siteJS []byte
 
@@ -31,6 +34,12 @@ func (s *Server) handleDonationQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Content-Disposition", `inline; filename="layhak-heng-aba-khqr.png"`)
 	http.ServeContent(w, r, "layhak-heng-aba-khqr.png", time.Time{}, bytes.NewReader(donationQR))
+}
+
+func (s *Server) handleSocialPreview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Disposition", `inline; filename="cambodia-holiday-api.png"`)
+	http.ServeContent(w, r, "cambodia-holiday-api.png", time.Time{}, bytes.NewReader(socialPreview))
 }
 
 func (s *Server) handleSiteJS(w http.ResponseWriter, _ *http.Request) {
@@ -81,11 +90,19 @@ const indexHTML = `<!doctype html>
 <meta property="og:title" content="Cambodia Public Holidays &amp; Free Khmer Holiday API">
 <meta property="og:description" content="Cambodian public holiday dates in Khmer and English, with transparent sources and a free JSON API.">
 <meta property="og:url" content="https://khmerholiday.layhak.dev/">
+<meta property="og:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png">
+<meta property="og:image:secure_url" content="https://khmerholiday.layhak.dev/assets/social-preview.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Cambodia Holiday API official Khmer and English public holiday data">
 <meta property="og:locale" content="en_KH">
 <meta property="og:locale:alternate" content="km_KH">
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Cambodia Public Holidays &amp; Free Khmer Holiday API">
 <meta name="twitter:description" content="Cambodian public holiday dates in Khmer and English, with transparent sources and a free JSON API.">
+<meta name="twitter:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png">
+<meta name="twitter:image:alt" content="Cambodia Holiday API official Khmer and English public holiday data">
 <style>
 :root{color-scheme:light dark;--fg:#17202a;--bg:#f8fafc;--surface:#fff;--mut:#5f6b78;--acc:#0369a1;--acc2:#0f766e;--bd:#dbe4ea;--code:#f1f5f9;--warn:#fff7e6;--warnbd:#e8a33d;--donate:#f0f9ff;--shadow:0 16px 44px rgba(15,23,42,.08)}
 @media(prefers-color-scheme:dark){:root{--fg:#e8edf2;--bg:#0d151c;--surface:#141f28;--mut:#a4b0bb;--acc:#38bdf8;--acc2:#5eead4;--bd:#2a3b48;--code:#192630;--warn:#2a2112;--donate:#102531;--shadow:none}}

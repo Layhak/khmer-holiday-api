@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -75,6 +77,8 @@ func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
 	for _, want := range []string{
 		"<title>Cambodia Public Holidays",
 		`rel="canonical" href="https://khmerholiday.layhak.dev/"`,
+		`property="og:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png"`,
+		`name="twitter:card" content="summary_large_image"`,
 		`id="support"`,
 		`src="/support/aba-khqr.png"`,
 		`src="/assets/site.js"`,
@@ -126,6 +130,25 @@ func TestDonationImageAndSearchFiles(t *testing.T) {
 	}
 	if body := image.Body.Bytes(); len(body) < 8 || string(body[:8]) != "\x89PNG\r\n\x1a\n" {
 		t.Fatal("donation image is not a valid PNG")
+	}
+
+	preview := perform(s, "/assets/social-preview.png")
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200", preview.Code)
+	}
+	if got := preview.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("preview Content-Type = %q, want image/png", got)
+	}
+	if body := preview.Body.Bytes(); len(body) < 8 || string(body[:8]) != "\x89PNG\r\n\x1a\n" {
+		t.Fatal("social preview is not a valid PNG")
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(preview.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("decode social preview: %v", err)
+	}
+	if config.Width != 1200 || config.Height != 630 {
+		t.Fatalf("social preview dimensions = %dx%d, want 1200x630",
+			config.Width, config.Height)
 	}
 
 	robots := perform(s, "/robots.txt")
