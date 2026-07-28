@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/khapi ./cmd/api &&
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/khapi-scrape ./cmd/scrape
 
 # Runtime stage
-FROM alpine:3.20
+FROM alpine:3.24
 
 # ca-certificates is required: every source is fetched over HTTPS.
 # tzdata keeps date handling correct if you set TZ=Asia/Phnom_Penh.

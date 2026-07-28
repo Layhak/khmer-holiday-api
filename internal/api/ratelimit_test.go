@@ -63,7 +63,7 @@ func TestNilRateLimiterAllowsEverything(t *testing.T) {
 
 	h := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), false)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusOK {
@@ -75,7 +75,7 @@ func TestMiddlewareReturns429WithRetryAfter(t *testing.T) {
 	rl := NewRateLimiter(60, 1)
 	h := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), false)
 
 	req := func() *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, "/api/v1/holidays", nil)
@@ -107,7 +107,7 @@ func TestHealthzBypassesRateLimit(t *testing.T) {
 	rl := NewRateLimiter(60, 1)
 	h := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), false)
 
 	for i := range 5 {
 		r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -123,33 +123,55 @@ func TestHealthzBypassesRateLimit(t *testing.T) {
 // Forwarded headers are spoofable, so they must be ignored unless the operator
 // has declared the service sits behind a trusted proxy.
 func TestClientIPIgnoresProxyHeadersByDefault(t *testing.T) {
-	trustedProxyHeaders = false
-	t.Cleanup(func() { trustedProxyHeaders = false })
-
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.1:5555"
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
 
-	if got := clientIP(r); got != "10.0.0.1" {
+	if got := clientIP(r, false); got != "10.0.0.1" {
 		t.Errorf("clientIP = %q, want the socket address 10.0.0.1 when proxies are untrusted", got)
 	}
 }
 
 func TestClientIPUsesProxyHeadersWhenTrusted(t *testing.T) {
-	trustedProxyHeaders = true
-	t.Cleanup(func() { trustedProxyHeaders = false })
-
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.1:5555"
 	r.Header.Set("X-Forwarded-For", "1.2.3.4, 10.0.0.9")
 
-	if got := clientIP(r); got != "1.2.3.4" {
+	if got := clientIP(r, true); got != "1.2.3.4" {
 		t.Errorf("clientIP = %q, want the left-most forwarded address 1.2.3.4", got)
 	}
 
 	r.Header.Set("CF-Connecting-IP", "5.6.7.8")
-	if got := clientIP(r); got != "5.6.7.8" {
+	if got := clientIP(r, true); got != "5.6.7.8" {
 		t.Errorf("clientIP = %q, want CF-Connecting-IP to take priority", got)
+	}
+}
+
+func TestClientIPRejectsMalformedProxyHeaders(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.1:5555"
+	r.Header.Set("CF-Connecting-IP", "attacker-controlled-value")
+	r.Header.Set("X-Forwarded-For", "also-not-an-ip")
+
+	if got := clientIP(r, true); got != "10.0.0.1" {
+		t.Errorf("clientIP = %q, want socket fallback for malformed proxy headers", got)
+	}
+}
+
+func TestRateLimiterBoundsIdentityMap(t *testing.T) {
+	rl := NewRateLimiter(60, 1)
+	rl.maxBuckets = 2
+
+	rl.Allow("1.1.1.1")
+	rl.Allow("2.2.2.2")
+	rl.Allow("3.3.3.3")
+	rl.Allow("4.4.4.4")
+
+	if len(rl.buckets) != 3 { // two identities plus one shared overflow bucket
+		t.Fatalf("bucket count = %d, want 3 bounded buckets", len(rl.buckets))
+	}
+	if _, ok := rl.buckets["3.3.3.3"]; ok {
+		t.Error("new identities should not allocate dedicated buckets after the cap")
 	}
 }
 

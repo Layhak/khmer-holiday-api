@@ -12,6 +12,7 @@ import (
 type Reconciliation struct {
 	Year     int
 	Holidays []model.Holiday
+	Complete bool
 
 	// Decree and DocumentURL come from the most authoritative source that
 	// identified the governing legal instrument.
@@ -70,6 +71,9 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 	byDate := map[string]model.Holiday{}
 
 	for _, s := range ordered {
+		if s.Complete {
+			r.Complete = true
+		}
 		if s.Decree != "" {
 			r.Decree = s.Decree
 		}

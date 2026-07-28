@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -175,5 +176,95 @@ func TestUpsertRejectsInvalidHoliday(t *testing.T) {
 		Conf: model.ConfidenceComputed, Source: "s"}
 	if _, _, _, err := st.Upsert(ctx, []model.Holiday{bad}); err == nil {
 		t.Error("want an error for a holiday with an empty key, got nil")
+	}
+
+	unsafeURL := mk(2027, time.January, 1, "intl_new_year", "s", model.ConfidenceComputed)
+	unsafeURL.SourceURL = "javascript:alert(1)"
+	if _, _, _, err := st.Upsert(ctx, []model.Holiday{unsafeURL}); err == nil {
+		t.Error("want an error for an unsafe source URL, got nil")
+	}
+}
+
+func TestReplaceYearIsAtomicOnValidationFailure(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+
+	original := mk(2027, time.January, 1, "intl_new_year", "nager", model.ConfidenceComputed)
+	if _, _, _, err := st.Upsert(ctx, []model.Holiday{original}); err != nil {
+		t.Fatal(err)
+	}
+
+	bad := mk(2026, time.January, 1, "wrong_year", "nager", model.ConfidenceComputed)
+	if _, _, err := st.ReplaceYear(ctx, 2027, []model.Holiday{bad}); err == nil {
+		t.Fatal("ReplaceYear accepted a row from the wrong year")
+	}
+
+	got, err := st.List(ctx, Filter{Year: 2027})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Key != "intl_new_year" {
+		t.Fatalf("existing year changed after failed replacement: %+v", got)
+	}
+}
+
+func TestReplaceYearRemovesStaleDates(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+
+	if _, _, _, err := st.Upsert(ctx, []model.Holiday{
+		mk(2027, time.October, 1, "pchum_ben", "nager", model.ConfidenceComputed),
+		mk(2027, time.October, 2, "pchum_ben", "nager", model.ConfidenceComputed),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement := []model.Holiday{
+		mk(2027, time.October, 2, "pchum_ben", "nager", model.ConfidenceComputed),
+	}
+	removed, inserted, err := st.ReplaceYear(ctx, 2027, replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 || inserted != 1 {
+		t.Fatalf("removed/inserted = %d/%d, want 2/1", removed, inserted)
+	}
+
+	got, err := st.List(ctx, Filter{Year: 2027})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Date.Day() != 2 {
+		t.Fatalf("replacement result = %+v, want only October 2", got)
+	}
+}
+
+func TestOpenSupportsReservedCharactersInPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "holidays ? #.db")
+	st, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := st.Years(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenSupportsRelativePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("data", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(context.Background(), "data/holidays.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := os.Stat("data/holidays.db"); err != nil {
+		t.Fatalf("relative database file was not created in data/: %v", err)
 	}
 }

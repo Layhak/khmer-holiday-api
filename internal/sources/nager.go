@@ -77,6 +77,7 @@ func (n *Nager) Fetch(ctx context.Context, year int) (*model.Snapshot, error) {
 		SourceURL: url,
 		Holidays:  Normalize(out),
 		FetchedAt: now,
+		Complete:  true,
 	}, nil
 }
 

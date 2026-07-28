@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,6 +98,10 @@ func cmdScrape(ctx context.Context, args []string) error {
 	)
 	fs.Parse(args)
 
+	if *replace && *source != "" {
+		return fmt.Errorf("-replace cannot be combined with -source: a partial source must not erase a full year")
+	}
+
 	years, err := targetYears(*year, *yearRng)
 	if err != nil {
 		return err
@@ -134,6 +140,9 @@ func scrapeYear(ctx context.Context, st *store.Store, srcs []sources.Source, yea
 
 	for _, s := range srcs {
 		snap, err := s.Fetch(ctx, year)
+		if err == nil {
+			err = sources.ValidateSnapshot(s, snap, year)
+		}
 
 		rec := store.FetchRecord{
 			Year:       year,
@@ -197,20 +206,28 @@ func scrapeYear(ctx context.Context, st *store.Store, srcs []sources.Source, yea
 	}
 
 	if replace {
-		n, err := st.DeleteYear(ctx, year)
+		if !rec.Complete {
+			return fmt.Errorf("refusing to replace %d: no validated source returned a complete year", year)
+		}
+		if rec.AnnouncedDays > 0 && !rec.CountMatches {
+			return fmt.Errorf("refusing to replace %d: announced day count %d does not match scraped count %d",
+				year, rec.AnnouncedDays, len(rec.Holidays))
+		}
+		removed, ins, err := st.ReplaceYear(ctx, year, rec.Holidays)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("  -> removed %d existing row(s) for %d\n", n, year)
+		fmt.Printf("  -> atomically replaced %d existing row(s) for %d\n", removed, year)
+		fmt.Printf("  -> %d holidays: %d new, 0 updated, 0 unchanged\n",
+			len(rec.Holidays), ins)
+	} else {
+		ins, upd, skip, err := st.Upsert(ctx, rec.Holidays)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("  -> %d holidays: %d new, %d updated, %d unchanged\n",
+			len(rec.Holidays), ins, upd, skip)
 	}
-
-	ins, upd, skip, err := st.Upsert(ctx, rec.Holidays)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("  -> %d holidays: %d new, %d updated, %d unchanged\n",
-		len(rec.Holidays), ins, upd, skip)
 
 	if rec.AnnouncedDays > 0 {
 		mark := "MISMATCH"
@@ -297,11 +314,13 @@ func cmdVerify(ctx context.Context, args []string) error {
 	)
 	fs.Parse(args)
 
-	if *year == 0 {
-		return fmt.Errorf("-year is required")
+	if *year < 1900 || *year > 2200 {
+		return fmt.Errorf("-year must be between 1900 and 2200")
 	}
-	if *decree == "" {
-		return fmt.Errorf("-decree is required: record which document you checked")
+	*decree = strings.TrimSpace(*decree)
+	*url = strings.TrimSpace(*url)
+	if err := sources.ValidateDocumentReference(*decree, *url); err != nil {
+		return err
 	}
 
 	st, err := store.Open(ctx, *dbPath)
@@ -364,9 +383,17 @@ func sourceRole(name string) string {
 func targetYears(year int, rng string) ([]int, error) {
 	switch {
 	case rng != "":
-		var lo, hi int
-		if _, err := fmt.Sscanf(rng, "%d-%d", &lo, &hi); err != nil {
+		loRaw, hiRaw, ok := strings.Cut(strings.TrimSpace(rng), "-")
+		if !ok || strings.Contains(hiRaw, "-") {
 			return nil, fmt.Errorf("invalid -years %q, want e.g. 2024-2027", rng)
+		}
+		lo, loErr := strconv.Atoi(strings.TrimSpace(loRaw))
+		hi, hiErr := strconv.Atoi(strings.TrimSpace(hiRaw))
+		if loErr != nil || hiErr != nil {
+			return nil, fmt.Errorf("invalid -years %q, want e.g. 2024-2027", rng)
+		}
+		if lo < 1900 || hi > 2200 {
+			return nil, fmt.Errorf("invalid -years %q: years must be between 1900 and 2200", rng)
 		}
 		if hi < lo {
 			return nil, fmt.Errorf("invalid -years %q: end is before start", rng)

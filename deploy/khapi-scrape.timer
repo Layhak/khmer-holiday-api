@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Cambodia public holiday data weekly
+
+[Timer]
+OnCalendar=Mon *-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=30min
+Unit=khapi-scrape.service
+
+[Install]
+WantedBy=timers.target

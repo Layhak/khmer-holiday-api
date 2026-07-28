@@ -3,6 +3,7 @@ package model
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -101,17 +102,42 @@ func (h Holiday) Validate() error {
 	if h.Date.IsZero() {
 		return fmt.Errorf("holiday %q: date is zero", h.Key)
 	}
+	if h.Date.Year() < 1900 || h.Date.Year() > 2200 {
+		return fmt.Errorf("holiday %q: implausible year %d", h.Key, h.Date.Year())
+	}
 	if strings.TrimSpace(h.Key) == "" {
 		return fmt.Errorf("holiday on %s: key is empty", h.Date.Format(DateLayout))
 	}
+	if len(h.Key) > 100 {
+		return fmt.Errorf("holiday on %s: key exceeds 100 bytes", h.Date.Format(DateLayout))
+	}
+	for _, r := range h.Key {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return fmt.Errorf("holiday on %s: key %q is not a lowercase slug",
+				h.Date.Format(DateLayout), h.Key)
+		}
+	}
 	if strings.TrimSpace(h.NameEN) == "" {
 		return fmt.Errorf("holiday %q: name_en is empty", h.Key)
+	}
+	if len(h.NameEN) > 300 || len(h.NameKM) > 600 {
+		return fmt.Errorf("holiday %q: name is unreasonably long", h.Key)
 	}
 	if h.Conf.Rank() == 0 {
 		return fmt.Errorf("holiday %q: unknown confidence %q", h.Key, h.Conf)
 	}
 	if strings.TrimSpace(h.Source) == "" {
 		return fmt.Errorf("holiday %q: source is empty", h.Key)
+	}
+	if len(h.Source) > 50 || len(h.SourceURL) > 2048 || len(h.Decree) > 200 {
+		return fmt.Errorf("holiday %q: provenance metadata is unreasonably long", h.Key)
+	}
+	if h.SourceURL != "" {
+		u, err := url.Parse(h.SourceURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") ||
+			u.Hostname() == "" || u.User != nil || strings.ContainsAny(h.SourceURL, "\r\n") {
+			return fmt.Errorf("holiday %q: source_url must be an absolute HTTP(S) URL without credentials", h.Key)
+		}
 	}
 	return nil
 }
@@ -126,6 +152,12 @@ type Snapshot struct {
 	Decree    string
 	Holidays  []Holiday
 	FetchedAt time.Time
+
+	// Complete means Holidays is intended to be the source's full list for the
+	// year, not a fixed-date cross-check or evidence-only subset. Destructive
+	// replacement is allowed only when at least one complete snapshot was
+	// successfully validated.
+	Complete bool
 
 	// AnnouncedDays is the total number of holiday days the source states for
 	// the year, when it reports a total without listing every date. The state

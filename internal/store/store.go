@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -62,7 +63,16 @@ CREATE TABLE IF NOT EXISTS fetches (
 func Open(ctx context.Context, path string) (*Store, error) {
 	// _busy_timeout keeps concurrent scrape+serve from failing on a lock;
 	// WAL lets the API read while a scrape writes.
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "foreign_keys(1)")
+	// Building url.URL{Scheme: "file", Path: "data/holidays.db"} produces
+	// file://data/holidays.db, where SQLite interprets "data" as a URI
+	// authority. Prefixing the escaped path directly preserves both relative
+	// and absolute filesystem semantics: file:data/... and file:/tmp/....
+	escapedPath := (&url.URL{Path: path}).EscapedPath()
+	dsn := "file:" + escapedPath + "?" + q.Encode()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -102,6 +112,9 @@ type Filter struct {
 // Validate rejects filters that cannot match anything, so the API can return a
 // 400 rather than a silently empty list.
 func (f Filter) Validate() error {
+	if f.Year < 0 || (f.Year > 0 && (f.Year < 1900 || f.Year > 2200)) {
+		return fmt.Errorf("year must be between 1900 and 2200, got %d", f.Year)
+	}
 	if f.Month < 0 || f.Month > 12 {
 		return fmt.Errorf("month must be 1-12, got %d", f.Month)
 	}
@@ -188,12 +201,24 @@ func (s *Store) List(ctx context.Context, f Filter) ([]model.Holiday, error) {
 // is what stops a computed 2027 projection from overwriting the official
 // sub-decree date once we have it, regardless of scrape order.
 func (s *Store) Upsert(ctx context.Context, hs []model.Holiday) (inserted, updated, skipped int, err error) {
+	if err := validateHolidays(hs, 0); err != nil {
+		return 0, 0, 0, err
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
 
+	inserted, updated, skipped, err = upsertTx(ctx, tx, hs)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return inserted, updated, skipped, tx.Commit()
+}
+
+func upsertTx(ctx context.Context, tx *sql.Tx, hs []model.Holiday) (inserted, updated, skipped int, err error) {
 	sel, err := tx.PrepareContext(ctx, `SELECT confidence, updated_at FROM holidays WHERE date = ?`)
 	if err != nil {
 		return 0, 0, 0, err
@@ -217,10 +242,6 @@ func (s *Store) Upsert(ctx context.Context, hs []model.Holiday) (inserted, updat
 	defer ins.Close()
 
 	for _, h := range hs {
-		if err := h.Validate(); err != nil {
-			return 0, 0, 0, err
-		}
-
 		var curConf, curUpdated string
 		row := sel.QueryRowContext(ctx, h.Date.Format(model.DateLayout))
 		switch scanErr := row.Scan(&curConf, &curUpdated); {
@@ -262,19 +283,65 @@ func (s *Store) Upsert(ctx context.Context, hs []model.Holiday) (inserted, updat
 	}
 
 	inserted = len(hs) - updated - skipped
-	return inserted, updated, skipped, tx.Commit()
+	return inserted, updated, skipped, nil
 }
 
-// DeleteYear removes every holiday in a year. Used by `scrape --replace` when a
-// new sub-decree supersedes a previous projection and dates have moved, which
-// would otherwise leave the stale dates orphaned in the table.
-func (s *Store) DeleteYear(ctx context.Context, year int) (int, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM holidays WHERE year = ?`, year)
-	if err != nil {
-		return 0, fmt.Errorf("delete year %d: %w", year, err)
+// ReplaceYear atomically swaps a year's rows. Validation and inserts happen in
+// the same transaction as deletion, so a malformed scrape or database error
+// cannot erase the previously served dataset.
+func (s *Store) ReplaceYear(ctx context.Context, year int, hs []model.Holiday) (removed, inserted int, err error) {
+	if year < 1900 || year > 2200 {
+		return 0, 0, fmt.Errorf("implausible year %d", year)
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	if len(hs) == 0 {
+		return 0, 0, fmt.Errorf("refusing to replace year %d with an empty dataset", year)
+	}
+	if err := validateHolidays(hs, year); err != nil {
+		return 0, 0, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin replacement: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM holidays WHERE year = ?`, year)
+	if err != nil {
+		return 0, 0, fmt.Errorf("delete year %d: %w", year, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, 0, fmt.Errorf("count deleted rows for %d: %w", year, err)
+	}
+
+	inserted, _, _, err = upsertTx(ctx, tx, hs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("replace year %d: %w", year, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("commit replacement for %d: %w", year, err)
+	}
+	return int(n), inserted, nil
+}
+
+func validateHolidays(hs []model.Holiday, expectedYear int) error {
+	seen := make(map[string]struct{}, len(hs))
+	for _, h := range hs {
+		if err := h.Validate(); err != nil {
+			return err
+		}
+		if expectedYear != 0 && h.Date.Year() != expectedYear {
+			return fmt.Errorf("holiday %s belongs to %d, not replacement year %d",
+				h.Date.Format(model.DateLayout), h.Date.Year(), expectedYear)
+		}
+		date := h.Date.Format(model.DateLayout)
+		if _, ok := seen[date]; ok {
+			return fmt.Errorf("duplicate holiday date %s", date)
+		}
+		seen[date] = struct{}{}
+	}
+	return nil
 }
 
 // Years lists the years that have data, ascending.

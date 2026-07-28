@@ -24,14 +24,20 @@ type RateLimiter struct {
 	rate  float64 // tokens added per second
 	burst float64 // maximum tokens held
 
-	mu      sync.Mutex
-	buckets map[string]*bucket
+	mu         sync.Mutex
+	buckets    map[string]*bucket
+	maxBuckets int
 }
 
 type bucket struct {
 	tokens float64
 	last   time.Time
 }
+
+const (
+	defaultMaxBuckets = 10_000
+	overflowBucketKey = "<overflow>"
+)
 
 // NewRateLimiter returns a limiter allowing perMinute requests per IP with the
 // given burst. A perMinute of zero disables limiting entirely.
@@ -43,9 +49,10 @@ func NewRateLimiter(perMinute, burst int) *RateLimiter {
 		burst = perMinute
 	}
 	rl := &RateLimiter{
-		rate:    float64(perMinute) / 60.0,
-		burst:   float64(burst),
-		buckets: make(map[string]*bucket),
+		rate:       float64(perMinute) / 60.0,
+		burst:      float64(burst),
+		buckets:    make(map[string]*bucket),
+		maxBuckets: defaultMaxBuckets,
 	}
 	go rl.reap()
 	return rl
@@ -63,6 +70,13 @@ func (rl *RateLimiter) Allow(key string) (bool, time.Duration) {
 
 	now := time.Now()
 	b, ok := rl.buckets[key]
+	if !ok && len(rl.buckets) >= rl.maxBuckets {
+		// Bound memory even when a botnet (or a misconfigured trusted proxy)
+		// presents an unending stream of new addresses. New identities share
+		// a fail-closed overflow bucket until idle entries are reaped.
+		key = overflowBucketKey
+		b, ok = rl.buckets[key]
+	}
 	if !ok {
 		rl.buckets[key] = &bucket{tokens: rl.burst - 1, last: now}
 		return true, 0
@@ -105,7 +119,7 @@ func (rl *RateLimiter) reap() {
 }
 
 // Middleware enforces the limit, keyed by client IP.
-func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+func (rl *RateLimiter) Middleware(next http.Handler, trustProxyHeaders bool) http.Handler {
 	if rl == nil {
 		return next
 	}
@@ -119,7 +133,7 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		key := clientIP(r)
+		key := clientIP(r, trustProxyHeaders)
 		w.Header().Set("X-RateLimit-Limit", limit)
 
 		ok, wait := rl.Allow(key)
@@ -135,33 +149,45 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// trustedProxyHeaders controls whether forwarded headers are believed. They are
-// trivially spoofable when the service is exposed directly, so honouring them
-// is opt-in for deployments that actually sit behind a proxy or CDN.
-var trustedProxyHeaders bool
-
 // clientIP resolves the caller's address.
-func clientIP(r *http.Request) string {
-	if trustedProxyHeaders {
+func clientIP(r *http.Request, trustProxyHeaders bool) string {
+	if trustProxyHeaders {
 		// Cloudflare's header is the most specific, so prefer it.
-		if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		if ip := validIP(r.Header.Get("CF-Connecting-IP")); ip != "" {
 			return ip
 		}
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			// Left-most entry is the original client.
 			if first, _, found := strings.Cut(xff, ","); found {
-				return strings.TrimSpace(first)
+				if ip := validIP(first); ip != "" {
+					return ip
+				}
+			} else if ip := validIP(xff); ip != "" {
+				return ip
 			}
-			return strings.TrimSpace(xff)
 		}
-		if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		if ip := validIP(r.Header.Get("X-Real-IP")); ip != "" {
 			return ip
 		}
 	}
 
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		if ip := validIP(r.RemoteAddr); ip != "" {
+			return ip
+		}
+		return "<unknown>"
 	}
-	return host
+	if ip := validIP(host); ip != "" {
+		return ip
+	}
+	return "<unknown>"
+}
+
+func validIP(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }

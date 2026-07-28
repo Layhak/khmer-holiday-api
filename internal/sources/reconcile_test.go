@@ -125,6 +125,26 @@ func TestReconcileFlagsUnconfirmedLunarDates(t *testing.T) {
 	}
 }
 
+func TestReconcileTracksCompleteSource(t *testing.T) {
+	got := Reconcile(2027, []*model.Snapshot{
+		{Year: 2027, Source: "wikipedia", Holidays: []model.Holiday{
+			h(day(2027, time.January, 1), "intl_new_year", "wikipedia", model.ConfidenceComputed),
+		}},
+	})
+	if got.Complete {
+		t.Fatal("partial cross-check must not authorize destructive replacement")
+	}
+
+	got = Reconcile(2027, []*model.Snapshot{
+		{Year: 2027, Source: "nager", Complete: true, Holidays: []model.Holiday{
+			h(day(2027, time.January, 1), "intl_new_year", "nager", model.ConfidenceComputed),
+		}},
+	})
+	if !got.Complete {
+		t.Fatal("validated complete source should authorize replacement")
+	}
+}
+
 func TestGroupMultiDaySplitsNonConsecutiveRuns(t *testing.T) {
 	hs := Normalize([]model.Holiday{
 		h(day(2026, time.April, 14), "khmer_new_year", "s", model.ConfidenceComputed),

@@ -153,6 +153,24 @@ Please cache responses on your side — the data changes a few times a *year*.
 > ⚠️ Set `KHAPI_TRUST_PROXY=true` **only** when the service actually sits behind
 > a proxy or CDN. Those headers are client-supplied; trusting them on a directly
 > exposed service lets anyone spoof an IP and bypass the rate limit entirely.
+> The proxy must overwrite, not append to, client-supplied forwarding headers.
+
+### Security boundaries
+
+- Scraper responses and external helper output are capped at 16 MiB; oversized
+  content is rejected instead of being silently truncated or buffered without
+  limit.
+- Every parsed snapshot is validated before reconciliation: requested year,
+  source identity, confidence ceiling, duplicate dates, row count, metadata
+  length, and provenance URL scheme.
+- `-replace` requires a validated complete-year source and runs as one SQLite
+  transaction. It refuses a known official day-count mismatch and cannot be
+  combined with a single partial `-source`.
+- Public errors are generic, failed helper details stay out of `/api/v1/status`,
+  and only successful API responses receive public cache headers.
+- The server bounds request headers and read/write time, validates forwarded IP
+  addresses, caps in-memory rate-limit identities, and sends restrictive
+  browser security headers.
 
 ---
 
@@ -226,7 +244,9 @@ bin/khapi-scrape verify -year 2027 \
 ```
 
 If the sub-decree moved a date away from the projection, re-scrape with
-`-replace` so the stale row is removed rather than orphaned.
+`-replace` so the stale row is removed rather than orphaned. Replacement
+requires the normal multi-source run; `-replace -source ...` is deliberately
+rejected because a partial source must never erase the full year.
 
 ---
 
@@ -265,11 +285,43 @@ weekly from July onward, since the sub-decree lands around September:
 docker build -t khmer-holiday-api .
 docker volume create khapi-data
 
-docker run --rm -v khapi-data:/data khmer-holiday-api \
-    sh -c 'khapi-scrape scrape -years 2024-2027'
+docker run --rm -v khapi-data:/data --entrypoint khapi-scrape \
+    khmer-holiday-api scrape -years 2024-2027
 
 docker run -d -p 8080:8080 -v khapi-data:/data --name khapi khmer-holiday-api
 ```
+
+---
+
+## GitHub Actions deployment
+
+[`.github/workflows/ci-deploy.yml`](.github/workflows/ci-deploy.yml) runs
+formatting, vet, race-enabled tests, and builds on every pull request and push
+to `main`. Production deployment is deliberately gated until the server is
+bootstrapped.
+
+Configure these GitHub Actions secrets:
+
+| Name | Purpose |
+|---|---|
+| `DEPLOY_HOST` | Droplet public IPv4 address |
+| `DEPLOY_USER` | Restricted SSH user, normally `deployer` |
+| `DEPLOY_SSH_KEY` | Private Ed25519 deployment key |
+| `DEPLOY_KNOWN_HOSTS` | Pinned SSH host-key line for the Droplet |
+
+Then set the repository variable `DEPLOY_ENABLED=true`. A push to `main` or a
+manual workflow run will build Linux binaries, verify the archive checksum,
+deploy through the restricted remote installer, restart the systemd service,
+roll back on a failed local health check, and verify the public HTTPS endpoint.
+
+Server configuration lives in `deploy/`:
+
+- `bootstrap-server.sh` creates the service/deployment users, installs Caddy,
+  disables password SSH, and enables the firewall.
+- `remote-deploy.sh` performs checksum-verified atomic releases and rollback.
+- `khapi.service` runs the API as an unprivileged, sandboxed systemd service.
+- `khapi-scrape.timer` refreshes the current and next year every Monday.
+- `Caddyfile` terminates HTTPS for `khmerholiday.layhak.dev`.
 
 ---
 
@@ -295,8 +347,9 @@ make test
 
 Tests cover the reconciler's promotion and mismatch rules, source precedence,
 multi-day grouping, name canonicalization, Khmer numeral conversion, the
-store's confidence guarantees, filter validation, and the rate limiter. They do
-not hit the network.
+store's confidence and atomic-replacement guarantees, upstream response and
+snapshot validation, public error/cache behavior, proxy handling, and the rate
+limiter. They do not hit the network.
 
 ---
 

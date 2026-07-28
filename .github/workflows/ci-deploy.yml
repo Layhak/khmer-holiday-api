@@ -1,0 +1,151 @@
+name: CI and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: khapi-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION_FILE: go.mod
+
+jobs:
+  verify:
+    name: Test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'The following files need gofmt:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test with race detector
+        run: go test -race -count=1 ./...
+
+      - name: Build local binaries
+        run: |
+          go build -trimpath -ldflags="-s -w" -o /tmp/khapi ./cmd/api
+          go build -trimpath -ldflags="-s -w" -o /tmp/khapi-scrape ./cmd/scrape
+
+  deploy:
+    name: Deploy production
+    needs: verify
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://khmerholiday.layhak.dev
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache-dependency-path: go.sum
+
+      - name: Build Linux release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="release-${GITHUB_SHA}"
+          install -d "${release_dir}/bin" "${release_dir}/deploy"
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" \
+            -o "${release_dir}/bin/khapi" ./cmd/api
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" \
+            -o "${release_dir}/bin/khapi-scrape" ./cmd/scrape
+
+          install -m 0644 deploy/Caddyfile "${release_dir}/deploy/Caddyfile"
+          install -m 0644 deploy/khapi.service "${release_dir}/deploy/khapi.service"
+          install -m 0644 deploy/khapi-scrape.service "${release_dir}/deploy/khapi-scrape.service"
+          install -m 0644 deploy/khapi-scrape.timer "${release_dir}/deploy/khapi-scrape.timer"
+
+          archive="khapi-release-${GITHUB_SHA}.tar.gz"
+          tar -czf "$archive" "$release_dir"
+          sha256sum "$archive" > "${archive}.sha256"
+
+      - name: Configure pinned SSH host
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Upload release
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          archive="khapi-release-${GITHUB_SHA}.tar.gz"
+          scp -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$archive" "${archive}.sha256" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/"
+
+      - name: Activate release
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          archive="/tmp/khapi-release-${GITHUB_SHA}.tar.gz"
+          ssh -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=15 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/local/sbin/deploy-khapi '$archive'"
+
+      - name: Verify public API
+        run: |
+          curl --fail --silent --show-error \
+            --retry 6 --retry-delay 10 --retry-all-errors \
+            https://khmerholiday.layhak.dev/healthz

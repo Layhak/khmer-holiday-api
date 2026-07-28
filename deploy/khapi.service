@@ -1,0 +1,36 @@
+[Unit]
+Description=Cambodia Public Holiday API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=khapi
+Group=khapi
+Environment=TZ=Asia/Phnom_Penh
+Environment=KHAPI_TRUST_PROXY=true
+ExecStart=/opt/khmer-holiday-api/bin/khapi -addr 127.0.0.1:8080 -db /var/lib/khmer-holiday-api/holidays.db
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/khmer-holiday-api
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

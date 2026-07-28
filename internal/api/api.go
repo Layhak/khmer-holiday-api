@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +35,21 @@ type Config struct {
 	CacheMaxAge time.Duration
 }
 
+// Validate rejects values that would accidentally disable protection or
+// overflow response headers when supplied through environment variables.
+func (c Config) Validate() error {
+	if c.RatePerMinute < 0 || c.RatePerMinute > 1_000_000 {
+		return fmt.Errorf("rate limit must be between 0 and 1000000 requests/minute")
+	}
+	if c.RatePerMinute > 0 && (c.RateBurst <= 0 || c.RateBurst > 1_000_000) {
+		return fmt.Errorf("rate burst must be between 1 and 1000000 when rate limiting is enabled")
+	}
+	if c.CacheMaxAge < 0 || c.CacheMaxAge > 365*24*time.Hour {
+		return fmt.Errorf("cache max-age must be between 0 and 365 days")
+	}
+	return nil
+}
+
 // DefaultConfig is the configuration used when none is supplied.
 func DefaultConfig() Config {
 	return Config{
@@ -55,8 +72,6 @@ func New(st *store.Store) *Server { return NewWithConfig(st, DefaultConfig()) }
 
 // NewWithConfig builds a Server with all routes registered.
 func NewWithConfig(st *store.Store, cfg Config) *Server {
-	trustedProxyHeaders = cfg.TrustProxyHeaders
-
 	s := &Server{
 		st:      st,
 		mux:     http.NewServeMux(),
@@ -79,30 +94,65 @@ func NewWithConfig(st *store.Store, cfg Config) *Server {
 // dataset is public reference data, so cross-origin reads are allowed from
 // anywhere.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.limiter.Middleware(http.HandlerFunc(s.serve)).ServeHTTP(w, r)
+	setPublicHeaders(w.Header())
+	w.Header().Set("Cache-Control", "no-store")
+	s.limiter.Middleware(http.HandlerFunc(s.serve), s.cfg.TrustProxyHeaders).ServeHTTP(w, r)
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
-	h := w.Header()
-	h.Set("Access-Control-Allow-Origin", "*")
-	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	h.Set("Access-Control-Max-Age", "86400")
-	h.Set("X-Content-Type-Options", "nosniff")
-
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Holiday data changes a few times a year at most; status must not be
-	// cached or operators would read stale scrape results.
-	if s.cfg.CacheMaxAge > 0 && cacheable(r.URL.Path) {
-		h.Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.cfg.CacheMaxAge.Seconds())))
-	} else {
-		h.Set("Cache-Control", "no-store")
+	// Only successful reference responses are cacheable. In particular, a CDN
+	// must never retain a transient database failure or a caller's 400 error.
+	cw := &cacheResponseWriter{
+		ResponseWriter: w,
+		public:         cacheable(r.URL.Path) && s.cfg.CacheMaxAge > 0,
+		maxAge:         s.cfg.CacheMaxAge,
 	}
+	s.mux.ServeHTTP(cw, r)
+}
 
-	s.mux.ServeHTTP(w, r)
+func setPublicHeaders(h http.Header) {
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	h.Set("Access-Control-Max-Age", "86400")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+	h.Set("Content-Security-Policy",
+		"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+}
+
+type cacheResponseWriter struct {
+	http.ResponseWriter
+	public      bool
+	maxAge      time.Duration
+	wroteHeader bool
+}
+
+func (w *cacheResponseWriter) WriteHeader(code int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	if w.public && code >= 200 && code < 300 {
+		w.Header().Set("Cache-Control",
+			fmt.Sprintf("public, max-age=%d", int(w.maxAge.Seconds())))
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *cacheResponseWriter) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
 }
 
 // cacheable reports whether a path serves slow-moving reference data.
@@ -146,17 +196,44 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("%s must be an integer, got %q", spec.param, raw))
 			return
 		}
+		switch spec.param {
+		case "year":
+			if v < 1900 || v > 2200 {
+				writeError(w, http.StatusBadRequest, "year must be between 1900 and 2200")
+				return
+			}
+		case "month":
+			if v < 1 || v > 12 {
+				writeError(w, http.StatusBadRequest, "month must be between 1 and 12")
+				return
+			}
+		case "day":
+			if v < 1 || v > 31 {
+				writeError(w, http.StatusBadRequest, "day must be between 1 and 31")
+				return
+			}
+		}
 		*spec.dst = v
 		applied[spec.param] = v
 	}
 
 	if k := strings.TrimSpace(q.Get("key")); k != "" {
+		if !validHolidayKey(k) {
+			writeError(w, http.StatusBadRequest,
+				"key must contain only lowercase letters, digits, and underscores (maximum 100 characters)")
+			return
+		}
 		f.Key = k
 		applied["key"] = k
 	}
-	if q.Get("official") == "true" {
-		f.OfficialOnly = true
-		applied["official"] = true
+	if raw := strings.TrimSpace(q.Get("official")); raw != "" {
+		official, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "official must be true or false")
+			return
+		}
+		f.OfficialOnly = official
+		applied["official"] = official
 	}
 
 	for _, spec := range []struct {
@@ -175,13 +252,22 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("%s must be YYYY-MM-DD, got %q", spec.param, raw))
 			return
 		}
+		if t.Year() < 1900 || t.Year() > 2200 {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("%s year must be between 1900 and 2200", spec.param))
+			return
+		}
 		*spec.dst = t
 		applied[spec.param] = raw
 	}
 
+	if err := f.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	hs, err := s.st.List(r.Context(), f)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeInternalError(w, r, err)
 		return
 	}
 
@@ -216,7 +302,7 @@ func (s *Server) handleByDate(w http.ResponseWriter, r *http.Request) {
 		Year: d.Year(), Month: int(d.Month()), Day: d.Day(),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, err)
 		return
 	}
 
@@ -231,7 +317,7 @@ func (s *Server) handleByDate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleYears(w http.ResponseWriter, r *http.Request) {
 	years, err := s.st.Years(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"years": years})
@@ -240,13 +326,21 @@ func (s *Server) handleYears(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	st, err := s.st.Status(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, err)
 		return
 	}
 	fetches, err := s.st.Fetches(r.Context(), 0)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, err)
 		return
+	}
+	for i := range fetches {
+		if !fetches[i].OK {
+			// Failure details can contain local command paths or untrusted
+			// helper stderr. Keep them in the operator's database/CLI, but do
+			// not disclose them through the unauthenticated public endpoint.
+			fetches[i].Note = "source unavailable; inspect scraper logs for details"
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"years":   st,
@@ -299,7 +393,13 @@ func provisionalWarnings(hs []model.Holiday) []string {
 		return nil
 	}
 	out := []string{}
-	for y, n := range byYear {
+	years := make([]int, 0, len(byYear))
+	for y := range byYear {
+		years = append(years, y)
+	}
+	sort.Ints(years)
+	for _, y := range years {
+		n := byYear[y]
 		out = append(out, fmt.Sprintf(
 			"%d of the returned %d holidays are not yet confirmed against the official sub-decree; "+
 				"lunar dates may shift. Filter with ?official=true to exclude them.", n, y))
@@ -322,14 +422,33 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"error": msg, "status": code})
 }
 
+func writeInternalError(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("request %s %q failed: %v", r.Method, r.URL.Path, err)
+	writeError(w, http.StatusInternalServerError, "internal server error")
+}
+
+func validHolidayKey(key string) bool {
+	if key == "" || len(key) > 100 {
+		return false
+	}
+	for _, r := range key {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 // Run starts the server and shuts it down cleanly when ctx is cancelled.
 func (s *Server) Run(ctx context.Context, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s,
+		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	errCh := make(chan error, 1)
