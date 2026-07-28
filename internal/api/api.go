@@ -1,0 +1,350 @@
+// Package api serves the read-only holiday HTTP endpoints.
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/layhak/khmer-holiday-api/internal/model"
+	"github.com/layhak/khmer-holiday-api/internal/store"
+)
+
+// Config tunes the public-facing behaviour of the server.
+type Config struct {
+	// RatePerMinute caps requests per client IP. Zero disables limiting.
+	RatePerMinute int
+
+	// RateBurst is the largest momentary burst a client may make.
+	RateBurst int
+
+	// TrustProxyHeaders makes the limiter read CF-Connecting-IP /
+	// X-Forwarded-For. Enable ONLY behind a proxy or CDN: these headers are
+	// client-supplied and trivially spoofed when the service is exposed
+	// directly, which would let anyone evade the limit.
+	TrustProxyHeaders bool
+
+	// CacheMaxAge sets Cache-Control on holiday responses. The data changes at
+	// most a few times a year, so a long TTL lets a CDN absorb the traffic.
+	CacheMaxAge time.Duration
+}
+
+// DefaultConfig is the configuration used when none is supplied.
+func DefaultConfig() Config {
+	return Config{
+		RatePerMinute: 60,
+		RateBurst:     20,
+		CacheMaxAge:   time.Hour,
+	}
+}
+
+// Server wires the routes to the store.
+type Server struct {
+	st      *store.Store
+	mux     *http.ServeMux
+	cfg     Config
+	limiter *RateLimiter
+}
+
+// New builds a Server with the default configuration.
+func New(st *store.Store) *Server { return NewWithConfig(st, DefaultConfig()) }
+
+// NewWithConfig builds a Server with all routes registered.
+func NewWithConfig(st *store.Store, cfg Config) *Server {
+	trustedProxyHeaders = cfg.TrustProxyHeaders
+
+	s := &Server{
+		st:      st,
+		mux:     http.NewServeMux(),
+		cfg:     cfg,
+		limiter: NewRateLimiter(cfg.RatePerMinute, cfg.RateBurst),
+	}
+
+	s.mux.HandleFunc("GET /api/v1/holidays", s.handleList)
+	s.mux.HandleFunc("GET /api/v1/holidays/{date}", s.handleByDate)
+	s.mux.HandleFunc("GET /api/v1/years", s.handleYears)
+	s.mux.HandleFunc("GET /api/v1/status", s.handleStatus)
+	s.mux.HandleFunc("GET /api/v1/sources", s.handleSources)
+	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /", s.handleIndex)
+
+	return s
+}
+
+// ServeHTTP applies CORS, caching and rate limiting, then dispatches. The
+// dataset is public reference data, so cross-origin reads are allowed from
+// anywhere.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.limiter.Middleware(http.HandlerFunc(s.serve)).ServeHTTP(w, r)
+}
+
+func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	h.Set("Access-Control-Max-Age", "86400")
+	h.Set("X-Content-Type-Options", "nosniff")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Holiday data changes a few times a year at most; status must not be
+	// cached or operators would read stale scrape results.
+	if s.cfg.CacheMaxAge > 0 && cacheable(r.URL.Path) {
+		h.Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(s.cfg.CacheMaxAge.Seconds())))
+	} else {
+		h.Set("Cache-Control", "no-store")
+	}
+
+	s.mux.ServeHTTP(w, r)
+}
+
+// cacheable reports whether a path serves slow-moving reference data.
+func cacheable(path string) bool {
+	switch {
+	case path == "/api/v1/status", path == "/healthz":
+		return false
+	case strings.HasPrefix(path, "/api/v1/"), path == "/":
+		return true
+	}
+	return false
+}
+
+type listResponse struct {
+	Count    int             `json:"count"`
+	Filter   map[string]any  `json:"filter,omitempty"`
+	Warnings []string        `json:"warnings,omitempty"`
+	Holidays []model.Holiday `json:"holidays"`
+}
+
+// handleList serves GET /api/v1/holidays with day/month/year filtering.
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	f := store.Filter{}
+	applied := map[string]any{}
+
+	for _, spec := range []struct {
+		param string
+		dst   *int
+	}{
+		{"year", &f.Year}, {"month", &f.Month}, {"day", &f.Day},
+	} {
+		raw := strings.TrimSpace(q.Get(spec.param))
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("%s must be an integer, got %q", spec.param, raw))
+			return
+		}
+		*spec.dst = v
+		applied[spec.param] = v
+	}
+
+	if k := strings.TrimSpace(q.Get("key")); k != "" {
+		f.Key = k
+		applied["key"] = k
+	}
+	if q.Get("official") == "true" {
+		f.OfficialOnly = true
+		applied["official"] = true
+	}
+
+	for _, spec := range []struct {
+		param string
+		dst   *time.Time
+	}{
+		{"from", &f.From}, {"to", &f.To},
+	} {
+		raw := strings.TrimSpace(q.Get(spec.param))
+		if raw == "" {
+			continue
+		}
+		t, err := time.Parse(model.DateLayout, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("%s must be YYYY-MM-DD, got %q", spec.param, raw))
+			return
+		}
+		*spec.dst = t
+		applied[spec.param] = raw
+	}
+
+	hs, err := s.st.List(r.Context(), f)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, listResponse{
+		Count:    len(hs),
+		Filter:   applied,
+		Warnings: provisionalWarnings(hs),
+		Holidays: hs,
+	})
+}
+
+type dateResponse struct {
+	Date      string          `json:"date"`
+	IsHoliday bool            `json:"is_holiday"`
+	Weekday   string          `json:"weekday"`
+	Holidays  []model.Holiday `json:"holidays"`
+}
+
+// handleByDate serves GET /api/v1/holidays/2026-04-14 - a direct "is this day
+// a holiday?" lookup, the query most callers actually need.
+func (s *Server) handleByDate(w http.ResponseWriter, r *http.Request) {
+	raw := r.PathValue("date")
+
+	d, err := time.Parse(model.DateLayout, raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("date must be YYYY-MM-DD, got %q", raw))
+		return
+	}
+
+	hs, err := s.st.List(r.Context(), store.Filter{
+		Year: d.Year(), Month: int(d.Month()), Day: d.Day(),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, dateResponse{
+		Date:      raw,
+		IsHoliday: len(hs) > 0,
+		Weekday:   d.Weekday().String(),
+		Holidays:  hs,
+	})
+}
+
+func (s *Server) handleYears(w http.ResponseWriter, r *http.Request) {
+	years, err := s.st.Years(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"years": years})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := s.st.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fetches, err := s.st.Fetches(r.Context(), 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"years":   st,
+		"fetches": fetches,
+	})
+}
+
+// sourceInfo documents each upstream and its current usability.
+type sourceInfo struct {
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Authority string `json:"authority"`
+	Status    string `json:"status"`
+	Notes     string `json:"notes"`
+}
+
+func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"sources": []sourceInfo{
+		{"nager", "https://date.nager.at/api/v3/PublicHolidays/{year}/KH", "computed", "working",
+			"Free JSON API, no key. Supplies the dates, including projections for future years."},
+		{"wikipedia", "https://en.wikipedia.org/wiki/Public_holidays_in_Cambodia", "computed", "working",
+			"Fixed-date holidays and Khmer names via the MediaWiki API. Emits no lunar dates by design."},
+		{"akp", "https://akp.gov.kh", "reported", "working",
+			"State news agency. Announces the sub-decree and its total day count, used to corroborate."},
+		{"mlvt", "https://www.mlvt.gov.kh", "official", "working (evidence only)",
+			"Ministry of Labour publishes the annual paid-holiday Prakas. PDF is a scanned image with no text layer, so dates need OCR or manual verification."},
+		{"mef", "https://mef.gov.kh", "official", "blocked",
+			"Returns HTTP 403 to non-browser clients (Cloudflare). Set MEF_FETCH_CMD to a headless fetcher to enable."},
+	}})
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.st.Years(r.Context()); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// provisionalWarnings surfaces unconfirmed dates in the response body so a
+// caller cannot mistake a projection for a confirmed date without opting in.
+func provisionalWarnings(hs []model.Holiday) []string {
+	byYear := map[int]int{}
+	for _, h := range hs {
+		if h.Conf != model.ConfidenceOfficial {
+			byYear[h.Year()]++
+		}
+	}
+	if len(byYear) == 0 {
+		return nil
+	}
+	out := []string{}
+	for y, n := range byYear {
+		out = append(out, fmt.Sprintf(
+			"%d of the returned %d holidays are not yet confirmed against the official sub-decree; "+
+				"lunar dates may shift. Filter with ?official=true to exclude them.", n, y))
+	}
+	return out
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		// Header is already sent; nothing useful left to do but stop.
+		return
+	}
+}
+
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]any{"error": msg, "status": code})
+}
+
+// Run starts the server and shuts it down cleanly when ctx is cancelled.
+func (s *Server) Run(ctx context.Context, addr string) error {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutCtx)
+	}
+}

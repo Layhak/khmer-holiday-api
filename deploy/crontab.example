@@ -1,0 +1,62 @@
+# Cambodia public holiday API - refresh schedule
+#
+# Install with:  crontab deploy/crontab.example
+# Adjust APP_DIR to wherever you deployed the binaries.
+
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+APP_DIR=/opt/khmer-holiday-api
+KHAPI_DB=/opt/khmer-holiday-api/data/holidays.db
+TZ=Asia/Phnom_Penh
+
+# ---------------------------------------------------------------------------
+# 1. Watch for NEXT year's sub-decree.
+#
+# The Royal Government signs the holiday sub-decree around September of the
+# preceding year (2026's was signed 5 September 2025 and published as Prakas
+# No. 216/25 on 18 September 2025). Checking weekly from July onward catches it
+# within days of publication without hammering the ministry sites year-round.
+#
+# Every Monday 06:00, July through December.
+0 6 * 7-12 1  cd $APP_DIR && ./bin/khapi-scrape scrape -year $(date +\%Y -d '+1 year') >> logs/scrape.log 2>&1
+
+# ---------------------------------------------------------------------------
+# 2. Re-verify the CURRENT year monthly.
+#
+# Catches the rare mid-year amendment - a holiday moved for a state funeral or
+# a substitute day added when a holiday falls on a weekend.
+#
+# 1st of each month, 06:30.
+30 6 1 * *    cd $APP_DIR && ./bin/khapi-scrape scrape -year $(date +\%Y) >> logs/scrape.log 2>&1
+
+# ---------------------------------------------------------------------------
+# 3. Early-January rollover.
+#
+# On 2 January, pull the new current year and the following year so the API is
+# never left serving only stale data.
+0 7 2 1 *     cd $APP_DIR && ./bin/khapi-scrape scrape >> logs/scrape.log 2>&1
+
+# ---------------------------------------------------------------------------
+# NOTE ON dates BSD vs GNU
+#
+# `date -d` above is GNU coreutils (Linux). On macOS/BSD use instead:
+#   $(date -v+1y +%Y)
+#
+# ---------------------------------------------------------------------------
+# AFTER THE SUB-DECREE IS PUBLISHED
+#
+# The scraper marks dates "reported" once the announced day count matches what
+# it holds. Promoting to "official" is a deliberate human step, because the
+# governing Prakas is a scanned PDF that no scraper can read:
+#
+#   ./bin/khapi-scrape status                  # see which years are provisional
+#   ./bin/khapi-scrape scrape -year 2027       # note the Prakas PDF URL it found
+#   # ... open the PDF, check the dates ...
+#   ./bin/khapi-scrape verify -year 2027 \
+#       -decree "Prakas No. NNN/26" \
+#       -url https://mlvt.gov.kh/media/k2/attachments/YYYYMMDD_NNN.pdf
+#
+# If the sub-decree moved a lunar date away from the projection, re-scrape that
+# year with -replace first so the stale date is removed rather than orphaned:
+#
+#   ./bin/khapi-scrape scrape -year 2027 -replace
