@@ -108,7 +108,6 @@ All combine with AND.
 {
   "count": 3,
   "filter": { "year": 2026, "month": 4 },
-  "warnings": ["3 of the returned 2026 holidays are not yet confirmed..."],
   "holidays": [
     {
       "key": "khmer_new_year",
@@ -116,8 +115,9 @@ All combine with AND.
       "name_km": "ពិធីបុណ្យចូលឆ្នាំថ្មីប្រពៃណីជាតិ",
       "ordinal": 1, "of_days": 3,
       "is_lunar": false,
-      "confidence": "reported",
-      "source": "nager",
+      "confidence": "official",
+      "source": "nbc",
+      "source_url": "https://www.nbc.gov.kh/english/news_and_events/official_holiday.php",
       "decree": "Prakas No. 216/25",
       "date": "2026-04-14",
       "year": 2026, "month": 4, "day": 14,

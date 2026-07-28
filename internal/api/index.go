@@ -262,12 +262,12 @@ footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid va
     </details>
   </article>
 
-  <article class="example" data-endpoint="/api/v1/holidays?year=2027&amp;official=true">
+  <article class="example" data-endpoint="/api/v1/holidays?year=2026&amp;official=true">
     <div class="example-head">
       <div><h3>Official dates only</h3><p>Exclude every date not yet verified against the governing document.</p></div>
       <button class="copy" type="button" data-copy-target="request-official">Copy request</button>
     </div>
-    <pre id="request-official"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2027&amp;official=true'</code></pre>
+    <pre id="request-official"><code>curl 'https://khmerholiday.layhak.dev/api/v1/holidays?year=2026&amp;official=true'</code></pre>
     <details class="live-response">
       <summary>Live response</summary>
       <div class="code-head"><span>JSON response</span><button class="copy response-copy" type="button" data-copy-target="response-official" disabled>Copy response</button></div>
