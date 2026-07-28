@@ -79,7 +79,7 @@ systemctl restart khapi.service
 systemctl enable --now khapi-scrape.timer
 
 if systemctl is-active --quiet caddy.service; then
-	systemctl reload caddy.service
+	systemctl restart caddy.service
 else
 	systemctl enable --now caddy.service
 fi
