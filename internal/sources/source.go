@@ -151,6 +151,7 @@ type Registry struct {
 // while Wikipedia only carries the fixed-date holidays as general reference -
 // so Nager's dates must win where the two overlap.
 var precedence = map[string]int{
+	"tallyfy":   -1,
 	"wikipedia": 0,
 	"nager":     1,
 	"akp":       2,
@@ -164,6 +165,7 @@ func Precedence(name string) int { return precedence[name] }
 // NewRegistry builds the default set of sources.
 func NewRegistry(c *httpx.Client) *Registry {
 	r := &Registry{sources: []Source{
+		NewTallyfy(c),   // computed  - lowest-precedence future-year cross-check
 		NewNager(c),     // computed  - always available, covers future years
 		NewWikipedia(c), // computed  - cross-check for names and Khmer script
 		NewAKP(c),       // reported  - state news agency announces the sub-decree

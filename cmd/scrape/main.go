@@ -363,6 +363,8 @@ func cmdSources(args []string) error {
 
 func sourceRole(name string) string {
 	switch name {
+	case "tallyfy":
+		return "lowest-precedence future-year cross-check"
 	case "nager":
 		return "primary dates, incl. future-year projections"
 	case "wikipedia":

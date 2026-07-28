@@ -368,6 +368,8 @@ type sourceInfo struct {
 
 func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"sources": []sourceInfo{
+		{"tallyfy", "https://tallyfy.com/national-holidays/api/KH/{year}.json", "computed", "working",
+			"Public JSON calendar for 2026-2030. Lowest-precedence cross-check; bank-only closures are excluded and it cannot authorize replacement."},
 		{"nager", "https://date.nager.at/api/v3/PublicHolidays/{year}/KH", "computed", "working",
 			"Free JSON API, no key. Supplies the dates, including projections for future years."},
 		{"wikipedia", "https://en.wikipedia.org/wiki/Public_holidays_in_Cambodia", "computed", "working",

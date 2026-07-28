@@ -180,6 +180,7 @@ Verified live. `make status` shows the current state of each.
 
 | Source | Authority | Status | Role |
 |---|---|---|---|
+| [Tallyfy](https://tallyfy.com/national-holidays/KH/) | computed | ✅ working | Public JSON calendar covering 2026–2030. Lowest-precedence future-year cross-check; bank-only closures are excluded and it never authorizes destructive replacement. |
 | [date.nager.at](https://date.nager.at/api/v3/PublicHolidays/2026/KH) | computed | ✅ working | **Primary dates.** Free JSON, no API key, EN + Khmer names, publishes future years. |
 | [Wikipedia](https://en.wikipedia.org/wiki/Public_holidays_in_Cambodia) | computed | ✅ working | Fixed-date cross-check via the MediaWiki API. Emits **no** lunar dates by design — the article gives them as "Moveable, April or May". |
 | [AKP](https://akp.gov.kh) | reported | ✅ working | State news agency. Announces the sub-decree and its **total day count**, used to corroborate. |
@@ -216,7 +217,9 @@ Sources are merged per year, weakest authority first, so stronger data lands las
 
 1. **Dates** come only from sources that carry dates. On conflict, higher
    authority wins; equal authority is broken by an explicit precedence list
-   (Nager's dates beat Wikipedia's).
+   (Nager beats Wikipedia, which beats Tallyfy). All dates for one canonical
+   holiday come from a single winning source, so conflicting calendars cannot
+   be accidentally combined into extra days.
 2. **Evidence-only** snapshots (AKP's day count, MLVT's Prakas link) contribute
    no dates but supply the decree reference and expected total.
 3. If an official source announced *N* days and we hold exactly *N*, the dataset
@@ -360,6 +363,8 @@ This project aggregates publicly available information. Credit where it is due:
 - **[Nager.Date](https://date.nager.at)** — the open holiday API that supplies
   the bulk of the dates. If you find this project useful, consider supporting
   theirs.
+- **[Tallyfy](https://tallyfy.com/national-holidays/KH/)** — the public
+  future-year Cambodia calendar used as a low-confidence cross-check.
 - **[Wikipedia](https://en.wikipedia.org/wiki/Public_holidays_in_Cambodia)** —
   contributors to *Public holidays in Cambodia*, text under CC BY-SA 4.0.
 - **Agence Kampuchea Presse (AKP)**, **Ministry of Labour and Vocational

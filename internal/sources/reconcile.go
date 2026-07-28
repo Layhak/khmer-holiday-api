@@ -34,9 +34,11 @@ type Reconciliation struct {
 //
 // The rules, in order:
 //
-//  1. Dates come from snapshots that actually carry dates. Where two sources
-//     disagree on a date for the same holiday key, the higher-authority source
-//     wins; ties go to the source that ran later.
+//  1. Dates come from snapshots that actually carry dates. All dates for one
+//     canonical holiday key come from the strongest source that carries that
+//     key. Higher authority wins, followed by explicit source precedence. This
+//     prevents a weaker projection from adding extra days when calendars
+//     disagree about a multi-day festival.
 //
 //  2. Evidence-only snapshots (AKP's day count, MLVT's Prakas link) never
 //     contribute dates, but they supply the decree reference and the expected
@@ -68,8 +70,6 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 		return Precedence(a.Source) < Precedence(b.Source)
 	})
 
-	byDate := map[string]model.Holiday{}
-
 	for _, s := range ordered {
 		if s.Complete {
 			r.Complete = true
@@ -83,21 +83,35 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 		if s.AnnouncedDays > 0 {
 			r.AnnouncedDays = s.AnnouncedDays
 		}
+	}
 
+	// Choose one source for each canonical holiday key before merging dates.
+	// Resolving only by date is insufficient: if a weak source says Khmer New
+	// Year is April 13-16 and a stronger source says April 14-16, the weak
+	// source's extra April 13 row would otherwise leak into the final calendar.
+	bestByKey := map[string]model.Holiday{}
+	for _, s := range ordered {
 		for _, h := range s.Holidays {
-			k := h.Date.Format(model.DateLayout)
-			prev, exists := byDate[k]
-			if exists {
-				if h.Conf.Rank() < prev.Conf.Rank() {
-					continue
-				}
-				// Equal authority: keep the higher-precedence source's row.
-				if h.Conf.Rank() == prev.Conf.Rank() &&
-					Precedence(h.Source) < Precedence(prev.Source) {
-					continue
-				}
+			current, exists := bestByKey[h.Key]
+			if !exists || holidayWins(h, current) {
+				bestByKey[h.Key] = h
 			}
-			byDate[k] = h
+		}
+	}
+
+	byDate := map[string]model.Holiday{}
+	for _, s := range ordered {
+		for _, h := range s.Holidays {
+			winner := bestByKey[h.Key]
+			if h.Source != winner.Source || h.Conf.Rank() != winner.Conf.Rank() {
+				continue
+			}
+
+			dateKey := h.Date.Format(model.DateLayout)
+			current, exists := byDate[dateKey]
+			if !exists || holidayWins(h, current) {
+				byDate[dateKey] = h
+			}
 		}
 	}
 
@@ -151,6 +165,16 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 	}
 
 	return r
+}
+
+func holidayWins(candidate, current model.Holiday) bool {
+	if candidate.Conf.Rank() != current.Conf.Rank() {
+		return candidate.Conf.Rank() > current.Conf.Rank()
+	}
+	if Precedence(candidate.Source) != Precedence(current.Source) {
+		return Precedence(candidate.Source) > Precedence(current.Source)
+	}
+	return true
 }
 
 // authorityOf reports the confidence a snapshot's rows carry, falling back to
