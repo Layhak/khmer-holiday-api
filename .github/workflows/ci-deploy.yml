@@ -92,6 +92,7 @@ jobs:
 
           install -m 0644 deploy/Caddyfile "${release_dir}/deploy/Caddyfile"
           install -m 0644 deploy/khapi.service "${release_dir}/deploy/khapi.service"
+          install -m 0755 deploy/remote-deploy.sh "${release_dir}/deploy/remote-deploy.sh"
           install -m 0644 deploy/khapi-scrape.service "${release_dir}/deploy/khapi-scrape.service"
           install -m 0644 deploy/khapi-scrape.timer "${release_dir}/deploy/khapi-scrape.timer"
 

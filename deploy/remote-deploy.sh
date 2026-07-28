@@ -34,6 +34,7 @@ for required in \
 	bin/khapi-scrape \
 	deploy/Caddyfile \
 	deploy/khapi.service \
+	deploy/remote-deploy.sh \
 	deploy/khapi-scrape.service \
 	deploy/khapi-scrape.timer
 do
@@ -41,6 +42,9 @@ do
 done
 
 caddy validate --config "$release_dir/deploy/Caddyfile"
+
+install -m 0755 "$release_dir/deploy/remote-deploy.sh" /usr/local/sbin/deploy-khapi.next
+mv -f /usr/local/sbin/deploy-khapi.next /usr/local/sbin/deploy-khapi
 
 install -d -m 0755 /opt/khmer-holiday-api/bin /opt/khmer-holiday-api/releases
 install -d -m 0750 -o khapi -g khapi /var/lib/khmer-holiday-api
