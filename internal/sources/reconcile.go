@@ -89,8 +89,19 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 	// Resolving only by date is insufficient: if a weak source says Khmer New
 	// Year is April 13-16 and a stronger source says April 14-16, the weak
 	// source's extra April 13 row would otherwise leak into the final calendar.
+	dateSources := ordered
+	if complete := strongestCompleteSnapshot(ordered); complete != nil {
+		dateSources = make([]*model.Snapshot, 0, len(ordered))
+		for _, snapshot := range ordered {
+			if snapshot.Source == complete.Source ||
+				snapshotConfidence(snapshot).Rank() > snapshotConfidence(complete).Rank() {
+				dateSources = append(dateSources, snapshot)
+			}
+		}
+	}
+
 	bestByKey := map[string]model.Holiday{}
-	for _, s := range ordered {
+	for _, s := range dateSources {
 		for _, h := range s.Holidays {
 			current, exists := bestByKey[h.Key]
 			if !exists || holidayWins(h, current) {
@@ -100,7 +111,7 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 	}
 
 	byDate := map[string]model.Holiday{}
-	for _, s := range ordered {
+	for _, s := range dateSources {
 		for _, h := range s.Holidays {
 			winner := bestByKey[h.Key]
 			if h.Source != winner.Source || h.Conf.Rank() != winner.Conf.Rank() {
@@ -165,6 +176,33 @@ func Reconcile(year int, snaps []*model.Snapshot) *Reconciliation {
 	}
 
 	return r
+}
+
+// strongestCompleteSnapshot chooses the full-year calendar that should define
+// the baseline. A complete calendar must not be supplemented with unique rows
+// from a weaker or equal-precedence projection; that is how an extra projected
+// Visak Bochea day leaked into an otherwise complete official 2026 calendar.
+func strongestCompleteSnapshot(snapshots []*model.Snapshot) *model.Snapshot {
+	var best *model.Snapshot
+	for _, snapshot := range snapshots {
+		if !snapshot.Complete || len(snapshot.Holidays) == 0 {
+			continue
+		}
+		if best == nil ||
+			snapshotConfidence(snapshot).Rank() > snapshotConfidence(best).Rank() ||
+			(snapshotConfidence(snapshot) == snapshotConfidence(best) &&
+				Precedence(snapshot.Source) > Precedence(best.Source)) {
+			best = snapshot
+		}
+	}
+	return best
+}
+
+func snapshotConfidence(snapshot *model.Snapshot) model.Confidence {
+	if len(snapshot.Holidays) == 0 {
+		return ""
+	}
+	return snapshot.Holidays[0].Conf
 }
 
 func holidayWins(candidate, current model.Holiday) bool {

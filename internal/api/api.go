@@ -378,6 +378,10 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 			"State news agency. Announces the sub-decree and its total day count, used to corroborate."},
 		{"mlvt", "https://www.mlvt.gov.kh", "official", "working (evidence only)",
 			"Ministry of Labour publishes the annual paid-holiday Prakas. PDF is a scanned image with no text layer, so dates need OCR or manual verification."},
+		{"mlvt_verified", "https://www.mlvt.gov.kh", "official", "working",
+			"Past calendars manually transcribed and visually verified against signed MLVT Prakas documents."},
+		{"nbc", "https://www.nbc.gov.kh/english/news_and_events/official_holiday.php", "official", "working",
+			"National Bank of Cambodia publishes the current year's official public-holiday dates as a machine-readable table."},
 		{"mef", "https://mef.gov.kh", "official", "blocked",
 			"Returns HTTP 403 to non-browser clients (Cloudflare). Set MEF_FETCH_CMD to a headless fetcher to enable."},
 	}})

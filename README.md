@@ -185,6 +185,8 @@ Verified live. `make status` shows the current state of each.
 | [Wikipedia](https://en.wikipedia.org/wiki/Public_holidays_in_Cambodia) | computed | ✅ working | Fixed-date cross-check via the MediaWiki API. Emits **no** lunar dates by design — the article gives them as "Moveable, April or May". |
 | [AKP](https://akp.gov.kh) | reported | ✅ working | State news agency. Announces the sub-decree and its **total day count**, used to corroborate. |
 | [MLVT](https://www.mlvt.gov.kh) | official | ⚠️ evidence only | Ministry of Labour publishes the binding Prakas. **The PDF is a scanned image with no text layer** — the adapter recovers the decree number and PDF URL, but dates need OCR or a human. |
+| Verified MLVT archive | official | ✅ working | Past calendars transcribed and visually checked against their signed MLVT Prakas. The 2025 archive contains all 22 days in Prakas No. 218/24, including Visak Bochea on 11 May. |
+| [National Bank of Cambodia](https://www.nbc.gov.kh/english/news_and_events/official_holiday.php) | official | ✅ working | Official current-year calendar with machine-readable dates. For 2026 it lists the same 21 days announced by AKP and governed by Prakas No. 216/25. |
 | [MEF](https://mef.gov.kh) | official | ❌ blocked | Returns **HTTP 403** to every non-browser client (Cloudflare). See below. |
 
 ### On mef.gov.kh
@@ -222,9 +224,12 @@ Sources are merged per year, weakest authority first, so stronger data lands las
    be accidentally combined into extra days.
 2. **Evidence-only** snapshots (AKP's day count, MLVT's Prakas link) contribute
    no dates but supply the decree reference and expected total.
-3. If an official source announced *N* days and we hold exactly *N*, the dataset
+3. NBC's machine-readable government calendar contributes **`official`** dates
+   for the current published year; visually verified MLVT calendars do the same
+   for supported past years.
+4. If an official source announced *N* days and we hold exactly *N*, the dataset
    is corroborated and computed rows are promoted to **`reported`**.
-4. If the counts **disagree**, nothing is promoted and a warning is emitted. A
+5. If the counts **disagree**, nothing is promoted and a warning is emitted. A
    silent mismatch is the failure mode that puts a wrong date in production, so
    it is surfaced loudly.
 
@@ -234,8 +239,10 @@ regardless of the order scrapes run in.
 
 ### Promoting to `official`
 
-Nothing auto-promotes to `official`, because the governing document is a scanned
-PDF. That last step is deliberate and human:
+When NBC publishes the requested year, its official HTML calendar is imported
+directly. Past years can be added to the verified MLVT archive after checking
+the scanned governing document. For years in neither source, the final
+promotion remains a deliberate human step:
 
 ```bash
 bin/khapi-scrape status                  # which years are provisional?
@@ -367,9 +374,10 @@ This project aggregates publicly available information. Credit where it is due:
   future-year Cambodia calendar used as a low-confidence cross-check.
 - **[Wikipedia](https://en.wikipedia.org/wiki/Public_holidays_in_Cambodia)** —
   contributors to *Public holidays in Cambodia*, text under CC BY-SA 4.0.
-- **Agence Kampuchea Presse (AKP)**, **Ministry of Labour and Vocational
-  Training (MLVT)**, and the **Royal Government of Cambodia** — the underlying
-  official announcements and legal instruments.
+- **National Bank of Cambodia (NBC)**, **Agence Kampuchea Presse (AKP)**,
+  **Ministry of Labour and Vocational Training (MLVT)**, and the **Royal
+  Government of Cambodia** — the official calendars, announcements, and legal
+  instruments.
 
 Holiday dates are facts and are not themselves copyrightable, but this project
 is not affiliated with or endorsed by the Royal Government of Cambodia or any

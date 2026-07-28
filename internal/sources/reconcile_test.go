@@ -109,7 +109,7 @@ func TestReconcilePrecedenceBreaksTies(t *testing.T) {
 	}
 }
 
-func TestReconcileDoesNotCombineConflictingCalendarsForOneHoliday(t *testing.T) {
+func TestReconcileUsesStrongestCompleteCalendarWithoutWeakerExtras(t *testing.T) {
 	tallyfy := []model.Holiday{
 		h(day(2026, time.April, 13), "khmer_new_year", "tallyfy", model.ConfidenceComputed),
 		h(day(2026, time.April, 14), "khmer_new_year", "tallyfy", model.ConfidenceComputed),
@@ -125,21 +125,19 @@ func TestReconcileDoesNotCombineConflictingCalendarsForOneHoliday(t *testing.T) 
 
 	got := Reconcile(2026, []*model.Snapshot{
 		{Year: 2026, Source: "tallyfy", Holidays: tallyfy},
-		{Year: 2026, Source: "nager", Holidays: nager},
+		{Year: 2026, Source: "nager", Holidays: nager, Complete: true},
 	})
 
-	if len(got.Holidays) != 4 {
-		t.Fatalf("holiday count = %d, want 3 Nager New Year days plus unique Visak day",
+	if len(got.Holidays) != 3 {
+		t.Fatalf("holiday count = %d, want only the 3-day complete Nager calendar",
 			len(got.Holidays))
 	}
 	for _, holiday := range got.Holidays {
-		if holiday.Key == "khmer_new_year" {
-			if holiday.Source != "nager" {
-				t.Errorf("New Year source = %s, want nager", holiday.Source)
-			}
-			if holiday.Date.Day() == 13 {
-				t.Error("weaker Tallyfy April 13 projection leaked into reconciled calendar")
-			}
+		if holiday.Source != "nager" {
+			t.Errorf("source = %s, want nager", holiday.Source)
+		}
+		if holiday.Key == "visak_bochea" || holiday.Date.Day() == 13 {
+			t.Error("weaker Tallyfy projection leaked into complete calendar")
 		}
 	}
 }

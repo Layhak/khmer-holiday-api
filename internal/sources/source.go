@@ -151,12 +151,14 @@ type Registry struct {
 // while Wikipedia only carries the fixed-date holidays as general reference -
 // so Nager's dates must win where the two overlap.
 var precedence = map[string]int{
-	"tallyfy":   -1,
-	"wikipedia": 0,
-	"nager":     1,
-	"akp":       2,
-	"mlvt":      3,
-	"mef":       4,
+	"tallyfy":       -1,
+	"wikipedia":     0,
+	"nager":         1,
+	"akp":           2,
+	"mlvt":          3,
+	"mlvt_verified": 4,
+	"nbc":           5,
+	"mef":           6,
 }
 
 // Precedence returns the tie-break weight for a source name.
@@ -165,12 +167,14 @@ func Precedence(name string) int { return precedence[name] }
 // NewRegistry builds the default set of sources.
 func NewRegistry(c *httpx.Client) *Registry {
 	r := &Registry{sources: []Source{
-		NewTallyfy(c),   // computed  - lowest-precedence future-year cross-check
-		NewNager(c),     // computed  - always available, covers future years
-		NewWikipedia(c), // computed  - cross-check for names and Khmer script
-		NewAKP(c),       // reported  - state news agency announces the sub-decree
-		NewMLVT(c),      // official  - Ministry of Labour publishes the Prakas
-		NewMEF(c),       // official  - blocked today, kept for when it opens up
+		NewTallyfy(c),        // computed  - lowest-precedence future-year cross-check
+		NewNager(c),          // computed  - always available, covers future years
+		NewWikipedia(c),      // computed  - cross-check for names and Khmer script
+		NewAKP(c),            // reported  - state news agency announces the sub-decree
+		NewMLVT(c),           // official  - Ministry of Labour publishes the Prakas
+		NewVerifiedArchive(), // official  - checked past-year MLVT calendars
+		NewNBC(c),            // official  - government calendar with machine-readable dates
+		NewMEF(c),            // official  - blocked today, kept for when it opens up
 	}}
 	sort.SliceStable(r.sources, func(i, j int) bool {
 		a, b := r.sources[i], r.sources[j]
