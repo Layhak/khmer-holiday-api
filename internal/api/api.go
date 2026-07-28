@@ -33,6 +33,10 @@ type Config struct {
 	// CacheMaxAge sets Cache-Control on holiday responses. The data changes at
 	// most a few times a year, so a long TTL lets a CDN absorb the traffic.
 	CacheMaxAge time.Duration
+
+	// ResponseCacheTTL bounds how long successful JSON responses may live in
+	// the optional server-side response cache.
+	ResponseCacheTTL time.Duration
 }
 
 // Validate rejects values that would accidentally disable protection or
@@ -47,24 +51,29 @@ func (c Config) Validate() error {
 	if c.CacheMaxAge < 0 || c.CacheMaxAge > 365*24*time.Hour {
 		return fmt.Errorf("cache max-age must be between 0 and 365 days")
 	}
+	if c.ResponseCacheTTL < 0 || c.ResponseCacheTTL > 24*time.Hour {
+		return fmt.Errorf("response cache TTL must be between 0 and 24 hours")
+	}
 	return nil
 }
 
 // DefaultConfig is the configuration used when none is supplied.
 func DefaultConfig() Config {
 	return Config{
-		RatePerMinute: 60,
-		RateBurst:     20,
-		CacheMaxAge:   time.Hour,
+		RatePerMinute:    60,
+		RateBurst:        20,
+		CacheMaxAge:      time.Hour,
+		ResponseCacheTTL: 5 * time.Minute,
 	}
 }
 
 // Server wires the routes to the store.
 type Server struct {
-	st      *store.Store
-	mux     *http.ServeMux
-	cfg     Config
-	limiter *RateLimiter
+	st            *store.Store
+	mux           *http.ServeMux
+	cfg           Config
+	limiter       *RateLimiter
+	responseCache ResponseCache
 }
 
 // New builds a Server with the default configuration.
@@ -72,11 +81,18 @@ func New(st *store.Store) *Server { return NewWithConfig(st, DefaultConfig()) }
 
 // NewWithConfig builds a Server with all routes registered.
 func NewWithConfig(st *store.Store, cfg Config) *Server {
+	return NewWithConfigAndCache(st, cfg, nil)
+}
+
+// NewWithConfigAndCache builds a Server with an optional Redis-compatible
+// response cache.
+func NewWithConfigAndCache(st *store.Store, cfg Config, responseCache ResponseCache) *Server {
 	s := &Server{
-		st:      st,
-		mux:     http.NewServeMux(),
-		cfg:     cfg,
-		limiter: NewRateLimiter(cfg.RatePerMinute, cfg.RateBurst),
+		st:            st,
+		mux:           http.NewServeMux(),
+		cfg:           cfg,
+		limiter:       NewRateLimiter(cfg.RatePerMinute, cfg.RateBurst),
+		responseCache: responseCache,
 	}
 
 	s.mux.HandleFunc("GET /api/v1/holidays", s.handleList)
@@ -122,6 +138,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		ResponseWriter: w,
 		public:         cacheable(r.URL.Path) && s.cfg.CacheMaxAge > 0,
 		maxAge:         s.cfg.CacheMaxAge,
+	}
+	if s.responseCache != nil && s.cfg.ResponseCacheTTL > 0 && redisResponseCacheable(r) {
+		s.serveWithResponseCache(cw, r)
+		return
 	}
 	s.mux.ServeHTTP(cw, r)
 }
@@ -279,6 +299,18 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	if err := f.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if f.Key != "" {
+		exists, err := s.st.KeyExists(r.Context(), f.Key)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusNotFound,
+				fmt.Sprintf("holiday key %q does not exist", f.Key))
+			return
+		}
 	}
 	hs, err := s.st.List(r.Context(), f)
 	if err != nil {

@@ -194,6 +194,19 @@ func (s *Store) List(ctx context.Context, f Filter) ([]model.Holiday, error) {
 	return out, rows.Err()
 }
 
+// KeyExists reports whether a canonical holiday key exists anywhere in the
+// stored dataset. It lets the API distinguish an unknown key from a valid key
+// that simply has no rows under the caller's other filters.
+func (s *Store) KeyExists(ctx context.Context, key string) (bool, error) {
+	var exists bool
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM holidays WHERE key = ? LIMIT 1)`, key,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check holiday key %q: %w", key, err)
+	}
+	return exists, nil
+}
+
 // Upsert writes holidays, letting better-sourced data win.
 //
 // The reconciliation rule: a row is replaced only when the incoming record has

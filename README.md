@@ -52,7 +52,8 @@ response.
 
 ## Quick start
 
-Requires Go 1.26+. No database server, no cgo, no API keys.
+Requires Go 1.26+. No database server, no cgo, no API keys. Redis is optional;
+without it the API reads directly from SQLite.
 
 ```bash
 git clone https://github.com/Layhak/khmer-holiday-api.git
@@ -101,6 +102,10 @@ All combine with AND.
 | `official` | `true` | Only decree-confirmed dates |
 
 `?month=4&day=14` with no year returns 14 April across every stored year.
+A syntactically valid but unknown `key` returns **404** with
+`{"error":"holiday key \"...\" does not exist","status":404}`. A known key
+that has no rows under the other supplied filters still returns an empty
+successful result.
 
 ### Response
 
@@ -135,7 +140,11 @@ equality match) with `ordinal`/`of_days` giving the position — "day 2 of 3".
 - **CORS** is open (`Access-Control-Allow-Origin: *`) — call it directly from a
   browser, no proxy needed.
 - **Caching**: holiday responses send `Cache-Control: public, max-age=3600`.
-  `/api/v1/status` and `/healthz` are `no-store`.
+  When `KHAPI_REDIS_URL` is set, successful JSON responses are also cached in
+  Redis for five minutes and report `X-Cache: MISS` or `HIT`. Redis errors fail
+  open to SQLite as `X-Cache: BYPASS`. Errors, oversized responses,
+  undocumented or duplicated query parameters, `/api/v1/status`, and
+  `/healthz` are never stored in Redis.
 - **Rate limit**: 60 requests/minute per IP by default, burst 20. Exceeding it
   returns **429** with a `Retry-After` header. `/healthz` is never limited.
 
@@ -146,6 +155,8 @@ Please cache responses on your side — the data changes a few times a *year*.
 | `KHAPI_RATE_LIMIT` | `60` | Requests/minute per IP. `0` disables. |
 | `KHAPI_RATE_BURST` | `20` | Largest momentary burst. |
 | `KHAPI_CACHE_SECONDS` | `3600` | `Cache-Control` max-age. |
+| `KHAPI_REDIS_URL` | empty | Optional `redis://` or `rediss://` connection URL. |
+| `KHAPI_REDIS_CACHE_SECONDS` | `300` | Server-side Redis response TTL; `0` disables. |
 | `KHAPI_TRUST_PROXY` | `false` | Read client IP from `CF-Connecting-IP` / `X-Forwarded-For`. |
 | `KHAPI_ADDR` | `:8080` | Listen address. |
 | `KHAPI_DB` | `data/holidays.db` | Database path. |
@@ -168,6 +179,10 @@ Please cache responses on your side — the data changes a few times a *year*.
   combined with a single partial `-source`.
 - Public errors are generic, failed helper details stay out of `/api/v1/status`,
   and only successful API responses receive public cache headers.
+- Redis keys are fixed-length SHA-256 hashes of normalized request targets;
+  only successful JSON responses up to 2 MiB are stored with a mandatory TTL,
+  and Redis outages fall back to SQLite. The production bootstrap binds Redis
+  to loopback, enables protected mode, and caps it at 64 MiB with LRU eviction.
 - The server bounds request headers and read/write time, validates forwarded IP
   addresses, caps in-memory rate-limit identities, and sends restrictive
   browser security headers.
@@ -326,8 +341,8 @@ roll back on a failed local health check, and verify the public HTTPS endpoint.
 
 Server configuration lives in `deploy/`:
 
-- `bootstrap-server.sh` creates the service/deployment users, installs Caddy,
-  disables password SSH, and enables the firewall.
+- `bootstrap-server.sh` creates the service/deployment users, installs Caddy
+  and Redis, disables password SSH, and enables the firewall.
 - `remote-deploy.sh` performs checksum-verified atomic releases and rollback.
 - `khapi.service` runs the API as an unprivileged, sandboxed systemd service.
 - `khapi-scrape.timer` refreshes the current and next year every Monday.
@@ -342,6 +357,7 @@ cmd/api/            HTTP server
 cmd/scrape/         scrape / status / verify CLI
 internal/model/     Holiday, Snapshot, Confidence
 internal/store/     SQLite schema, filtering, confidence-aware upsert
+internal/rediscache/ Redis cache-aside adapter
 internal/sources/   one adapter per upstream + the reconciler
 internal/httpx/     shared retrying HTTP client
 internal/api/       routes, JSON encoding, self-hosted docs

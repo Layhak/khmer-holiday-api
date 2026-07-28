@@ -17,6 +17,7 @@ apt-get install -y --no-install-recommends \
 	debian-keyring \
 	debian-archive-keyring \
 	gnupg \
+	redis-server \
 	ufw
 
 install -d -m 0755 /usr/share/keyrings
@@ -73,5 +74,11 @@ ufw allow 443/tcp
 ufw --force enable
 
 systemctl disable --now caddy.service
+systemctl enable --now redis-server.service
+redis-cli CONFIG SET bind 127.0.0.1 >/dev/null
+redis-cli CONFIG SET protected-mode yes >/dev/null
+redis-cli CONFIG SET maxmemory 64mb >/dev/null
+redis-cli CONFIG SET maxmemory-policy allkeys-lru >/dev/null
+redis-cli CONFIG REWRITE >/dev/null
 
 echo "server bootstrap complete"

@@ -128,6 +128,25 @@ func TestFilterByDayMonthYear(t *testing.T) {
 	}
 }
 
+func TestKeyExists(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	if _, _, _, err := st.Upsert(ctx, []model.Holiday{
+		mk(2026, time.January, 1, "intl_new_year", "nbc", model.ConfidenceOfficial),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	exists, err := st.KeyExists(ctx, "intl_new_year")
+	if err != nil || !exists {
+		t.Fatalf("known key: exists=%v err=%v", exists, err)
+	}
+	exists, err = st.KeyExists(ctx, "does_not_exist")
+	if err != nil || exists {
+		t.Fatalf("unknown key: exists=%v err=%v", exists, err)
+	}
+}
+
 func TestFilterValidationRejectsImpossibleValues(t *testing.T) {
 	for _, f := range []Filter{
 		{Month: 13},

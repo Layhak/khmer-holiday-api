@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/layhak/khmer-holiday-api/internal/api"
+	"github.com/layhak/khmer-holiday-api/internal/rediscache"
 	"github.com/layhak/khmer-holiday-api/internal/store"
 )
 
@@ -27,6 +28,10 @@ func main() {
 			"largest momentary burst per IP")
 		cacheAge = flag.Int("cache", envInt("KHAPI_CACHE_SECONDS", 3600),
 			"Cache-Control max-age in seconds for holiday responses")
+		redisURL = flag.String("redis", envOr("KHAPI_REDIS_URL", ""),
+			"Redis URL for optional server-side response caching")
+		redisCacheAge = flag.Int("redis-cache", envInt("KHAPI_REDIS_CACHE_SECONDS", 300),
+			"Redis response-cache TTL in seconds (0 disables)")
 		trustProxy = flag.Bool("trust-proxy", envBool("KHAPI_TRUST_PROXY", false),
 			"read client IP from CF-Connecting-IP/X-Forwarded-For; enable ONLY behind a proxy or CDN")
 	)
@@ -37,14 +42,15 @@ func main() {
 		RateBurst:         *burst,
 		TrustProxyHeaders: *trustProxy,
 		CacheMaxAge:       time.Duration(*cacheAge) * time.Second,
+		ResponseCacheTTL:  time.Duration(*redisCacheAge) * time.Second,
 	}
 
-	if err := run(*addr, *dbPath, cfg); err != nil {
+	if err := run(*addr, *dbPath, *redisURL, cfg); err != nil {
 		log.Fatalf("api: %v", err)
 	}
 }
 
-func run(addr, dbPath string, cfg api.Config) error {
+func run(addr, dbPath, redisURL string, cfg api.Config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -57,6 +63,18 @@ func run(addr, dbPath string, cfg api.Config) error {
 		return err
 	}
 	defer st.Close()
+
+	var responseCache api.ResponseCache
+	if redisURL != "" && cfg.ResponseCacheTTL > 0 {
+		cache, err := rediscache.Open(ctx, redisURL)
+		if err != nil {
+			log.Printf("warning: Redis cache unavailable; continuing with SQLite: %v", err)
+		} else {
+			responseCache = cache
+			defer cache.Close()
+			log.Printf("Redis response cache enabled (TTL %s)", cfg.ResponseCacheTTL)
+		}
+	}
 
 	years, err := st.Years(ctx)
 	if err != nil {
@@ -77,7 +95,7 @@ func run(addr, dbPath string, cfg api.Config) error {
 	}
 
 	log.Printf("listening on %s (docs at http://localhost%s/)", addr, portOf(addr))
-	return api.NewWithConfig(st, cfg).Run(ctx, addr)
+	return api.NewWithConfigAndCache(st, cfg, responseCache).Run(ctx, addr)
 }
 
 func envOr(key, def string) string {

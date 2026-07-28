@@ -9,6 +9,8 @@ User=khapi
 Group=khapi
 Environment=TZ=Asia/Phnom_Penh
 Environment=KHAPI_TRUST_PROXY=true
+Environment=KHAPI_REDIS_URL=redis://127.0.0.1:6379/0
+Environment=KHAPI_REDIS_CACHE_SECONDS=300
 ExecStart=/opt/khmer-holiday-api/bin/khapi -addr 127.0.0.1:8080 -db /var/lib/khmer-holiday-api/holidays.db
 Restart=on-failure
 RestartSec=5s

@@ -213,6 +213,34 @@ func TestInvalidFiltersAreRejectedAndNeverCached(t *testing.T) {
 	}
 }
 
+func TestUnknownKeyReturnsNotFoundButKnownKeyCanHaveNoFilteredRows(t *testing.T) {
+	s, _ := testServer(t)
+
+	unknown := perform(s, "/api/v1/holidays?key=does_not_exist")
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown-key status = %d, want 404", unknown.Code)
+	}
+	if !strings.Contains(unknown.Body.String(), `holiday key \"does_not_exist\" does not exist`) {
+		t.Fatalf("unknown-key response = %q", unknown.Body.String())
+	}
+	if unknown.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unknown-key Cache-Control = %q, want no-store",
+			unknown.Header().Get("Cache-Control"))
+	}
+
+	knownButFiltered := perform(s, "/api/v1/holidays?key=intl_new_year&year=2026")
+	if knownButFiltered.Code != http.StatusOK {
+		t.Fatalf("known filtered key status = %d, want 200", knownButFiltered.Code)
+	}
+	var response listResponse
+	if err := json.Unmarshal(knownButFiltered.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Count != 0 {
+		t.Fatalf("known filtered key count = %d, want 0", response.Count)
+	}
+}
+
 func TestStatusSuppressesPrivateFailureDetails(t *testing.T) {
 	s, st := testServer(t)
 	err := st.RecordFetch(context.Background(), store.FetchRecord{
