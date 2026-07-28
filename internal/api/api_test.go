@@ -82,6 +82,8 @@ func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
 		`id="support"`,
 		`src="/support/aba-khqr.png"`,
 		`src="/assets/site.js"`,
+		`href="https://github.com/Layhak/khmer-holiday-api"`,
+		`★ Star on GitHub`,
 		`confirm that the recipient`,
 		`lang="km"`,
 	} {

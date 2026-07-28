@@ -119,6 +119,8 @@ h1{max-width:48rem;font-size:clamp(2rem,5vw,3.35rem);line-height:1.1;margin:0 0 
 .khmer{font-family:"Noto Sans Khmer",system-ui,sans-serif}
 nav{margin-top:1.4rem;display:flex;gap:.7rem;flex-wrap:wrap}
 nav a{color:#fff;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.55)}
+.github-link{padding:.1rem .65rem;border:1px solid rgba(255,255,255,.65)!important;border-radius:999px;background:rgba(255,255,255,.1);font-weight:700}
+.github-link:hover{background:rgba(255,255,255,.2)}
 main{padding:2.2rem 1.25rem 4rem}
 .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:-3.5rem;margin-bottom:2.5rem}
 .fact{background:var(--surface);border:1px solid var(--bd);border-radius:12px;padding:1rem 1.1rem;box-shadow:var(--shadow)}
@@ -174,6 +176,7 @@ footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid va
       <a href="#examples">Examples</a>
       <a href="#confidence">Data confidence</a>
       <a href="#support">Support this project</a>
+      <a class="github-link" href="https://github.com/Layhak/khmer-holiday-api" target="_blank" rel="noopener noreferrer" aria-label="Star Khmer Holiday API on GitHub">★ Star on GitHub</a>
     </nav>
   </div>
 </header>
@@ -325,6 +328,7 @@ footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid va
 
 <footer>
   Cambodia public holiday data for developers and the Cambodian community. Built and maintained by Layhak Heng.
+  <a href="https://github.com/Layhak/khmer-holiday-api" target="_blank" rel="noopener noreferrer">View the source and give it a star on GitHub ★</a>
 </footer>
 <script src="/assets/site.js" defer></script>
 </body>
