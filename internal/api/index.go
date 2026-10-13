@@ -28,7 +28,7 @@ var appleTouchIcon []byte
 var siteJS []byte
 
 // handleIndex serves a self-contained API reference and landing page at the
-// root. It deliberately has no JavaScript or third-party resources.
+// root. Search metadata and reference content are rendered without JavaScript.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		writeError(w, http.StatusNotFound, "not found: "+r.URL.Path)
@@ -104,8 +104,8 @@ const indexHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cambodia Public Holidays &amp; Free Khmer Holiday API</title>
-<meta name="description" content="Current and upcoming Cambodia public holidays with Khmer and English names, source confidence, date filters and a free JSON API for developers.">
+<title>Khmer Holiday API | Free Cambodia Public Holiday JSON API</title>
+<meta name="description" content="Free Khmer Holiday API for Cambodia public holidays, Khmer New Year and Pchum Ben. Get JSON dates with Khmer and English names, filters and source confidence.">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta name="theme-color" content="#075985">
 <link rel="canonical" href="https://khmerholiday.layhak.dev/">
@@ -114,22 +114,21 @@ const indexHTML = `<!doctype html>
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Khmer Holiday API">
-<meta property="og:title" content="Cambodia Public Holidays &amp; Free Khmer Holiday API">
-<meta property="og:description" content="Cambodian public holiday dates in Khmer and English, with transparent sources and a free JSON API.">
+<meta property="og:title" content="Khmer Holiday API | Free Cambodia Public Holiday JSON API">
+<meta property="og:description" content="Free Khmer Holiday API for Cambodian public holidays in Khmer and English. Query dates by year, month or holiday, with transparent sources and confidence levels.">
 <meta property="og:url" content="https://khmerholiday.layhak.dev/">
 <meta property="og:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png">
 <meta property="og:image:secure_url" content="https://khmerholiday.layhak.dev/assets/social-preview.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Cambodia Holiday API official Khmer and English public holiday data">
+<meta property="og:image:alt" content="Khmer Holiday API — Cambodia public holiday data in Khmer and English">
 <meta property="og:locale" content="en_KH">
-<meta property="og:locale:alternate" content="km_KH">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Cambodia Public Holidays &amp; Free Khmer Holiday API">
-<meta name="twitter:description" content="Cambodian public holiday dates in Khmer and English, with transparent sources and a free JSON API.">
+<meta name="twitter:title" content="Khmer Holiday API | Free Cambodia Public Holiday JSON API">
+<meta name="twitter:description" content="Free Khmer Holiday API for Cambodian public holidays in Khmer and English. Query dates by year, month or holiday, with transparent sources and confidence levels.">
 <meta name="twitter:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png">
-<meta name="twitter:image:alt" content="Cambodia Holiday API official Khmer and English public holiday data">
+<meta name="twitter:image:alt" content="Khmer Holiday API — Cambodia public holiday data in Khmer and English">
 <style>
 :root{color-scheme:light dark;--fg:#17202a;--bg:#f8fafc;--surface:#fff;--mut:#5f6b78;--acc:#0369a1;--acc2:#0f766e;--bd:#dbe4ea;--code:#f1f5f9;--warn:#fff7e6;--warnbd:#e8a33d;--donate:#f0f9ff;--shadow:0 16px 44px rgba(15,23,42,.08)}
 @media(prefers-color-scheme:dark){:root{--fg:#e8edf2;--bg:#0d151c;--surface:#141f28;--mut:#a4b0bb;--acc:#38bdf8;--acc2:#5eead4;--bd:#2a3b48;--code:#192630;--warn:#2a2112;--donate:#102531;--shadow:none}}
@@ -190,27 +189,35 @@ footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid va
 @media(max-width:720px){header{padding-top:2.6rem}.facts{grid-template-columns:1fr;margin-top:-2rem}.example-head{align-items:flex-start}.donate{grid-template-columns:1fr}.donate picture{max-width:420px;margin:0 auto}table{min-width:34rem}}
 </style>
 </head>
-<body>
+<body itemscope itemtype="https://schema.org/WebSite" itemid="https://khmerholiday.layhak.dev/#website">
+<meta itemprop="name" content="Khmer Holiday API">
+<meta itemprop="alternateName" content="Cambodia Holiday API">
+<link itemprop="url" href="https://khmerholiday.layhak.dev/">
 <a class="skip" href="#content">Skip to content</a>
 <header>
   <div class="hero">
     <span class="eyebrow">Free public JSON API</span>
-    <h1>Cambodia Public Holidays &amp; Khmer Holiday API</h1>
-    <p class="lead">Search Cambodian public holidays by date, month or year, with Khmer and English names and a clear confidence level for every result.</p>
+    <h1>Khmer Holiday API for Cambodia Public Holidays</h1>
+    <p class="lead">A free JSON API for Cambodian public holidays, including Khmer New Year, Pchum Ben and Water Festival. Search by date, month or year, with Khmer and English names and a clear confidence level for every result.</p>
     <p class="lead khmer" lang="km">ស្វែងរកថ្ងៃឈប់សម្រាកសាធារណៈនៅកម្ពុជា ជាភាសាខ្មែរ និងអង់គ្លេស។</p>
     <nav aria-label="Page navigation">
       <a href="#endpoints">API endpoints</a>
       <a href="#examples">Examples</a>
       <a href="#confidence">Data confidence</a>
+      <a href="#about">About the API</a>
       <a href="#support">Support this project</a>
       <a class="github-link" href="https://github.com/Layhak/khmer-holiday-api" target="_blank" rel="noopener noreferrer" aria-label="Star Khmer Holiday API on GitHub">★ Star on GitHub</a>
     </nav>
   </div>
 </header>
 
-<main id="content" itemscope itemtype="https://schema.org/WebAPI">
+<main id="content" itemprop="mainEntity" itemscope itemtype="https://schema.org/WebAPI" itemid="https://khmerholiday.layhak.dev/#api">
 <meta itemprop="name" content="Khmer Holiday API">
-<meta itemprop="description" content="Free JSON API for Cambodia public holiday dates in Khmer and English.">
+<meta itemprop="description" content="Free Khmer Holiday API for Cambodia public holidays with Khmer and English names, date filters and source confidence.">
+<meta itemprop="isAccessibleForFree" content="true">
+<meta itemprop="inLanguage" content="en">
+<meta itemprop="inLanguage" content="km">
+<link itemprop="documentation" href="https://khmerholiday.layhak.dev/#endpoints">
 <link itemprop="url" href="https://khmerholiday.layhak.dev/">
 
 <div class="facts" aria-label="Service highlights">
@@ -333,6 +340,18 @@ footer{padding:1.25rem;color:var(--mut);font-size:.88rem;border-top:1px solid va
 <tr><td><span class="tag">reported</span></td><td>Published by a reputable source and corroborated where possible.</td></tr>
 <tr><td><span class="tag">computed</span></td><td>Projected from the lunisolar calendar and may shift.</td></tr>
 </table></div>
+</section>
+
+<section id="about" aria-labelledby="about-heading">
+<h2 id="about-heading">About the Khmer Holiday API</h2>
+<p>The Khmer Holiday API provides Cambodia public holiday dates for calendars, HR and payroll systems, booking tools and other applications. Holiday records include Khmer and English names, making them useful for both Cambodian users and international teams.</p>
+<h3>Which Cambodian holidays can I look up?</h3>
+<p>Look up holidays such as Khmer New Year (Choul Chnam Thmey), Pchum Ben, Water Festival (Bon Om Touk) and Independence Day. Filter the available records by year, month, date range or holiday key. Use the <a href="/api/v1/years">available years endpoint</a> to check current coverage.</p>
+<h3>Is the holiday API free to use?</h3>
+<p>Yes. The public API returns JSON without an API key. Requests are rate limited to keep the service available to everyone. Start with the <a href="#examples">request examples</a> and <a href="#endpoints">API reference</a>.</p>
+<h3>Are all holiday dates officially confirmed?</h3>
+<p>This is an independent, open-source project maintained by Layhak Heng. Records distinguish official, reported and computed dates. Check each record's confidence and source before using it, especially for lunar holidays. The <code>official=true</code> filter returns only dates verified against the governing document; coverage may be incomplete.</p>
+<p class="khmer" lang="km">API ថ្ងៃឈប់សម្រាកនៅកម្ពុជា ផ្តល់ទិន្នន័យជាភាសាខ្មែរ និងអង់គ្លេស សម្រាប់ថ្ងៃបុណ្យចូលឆ្នាំខ្មែរ បុណ្យភ្ជុំបិណ្ឌ និងបុណ្យអុំទូក។</p>
 </section>
 
 <section class="donate" id="support" aria-labelledby="support-heading">

@@ -75,7 +75,7 @@ func TestHomepageHasDonationAndSearchMetadata(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	for _, want := range []string{
-		"<title>Cambodia Public Holidays",
+		"<title>Khmer Holiday API | Free Cambodia Public Holiday JSON API</title>",
 		`rel="canonical" href="https://khmerholiday.layhak.dev/"`,
 		`property="og:image" content="https://khmerholiday.layhak.dev/assets/social-preview.png"`,
 		`name="twitter:card" content="summary_large_image"`,
